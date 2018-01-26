@@ -421,7 +421,6 @@ def macs2callpeaks(infiles, outfile):
         name = os.path.basename(outfile).split(".")[0]
         
         statement='''macs2 callpeak 
-                       --format BAMPE
                        --outdir macs2.dir                  
                        %(options)s 
                        --treatment %(bam)s 
@@ -450,10 +449,7 @@ def macs2callpeaks(infiles, outfile):
 
         statement='''macs2 callpeak 
                        --outdir macs2.dir 
-                       --nomodel 
-                       --extsize 147                 
                        %(options)s 
-                       --tsize %(fragment_length)s
                        --treatment %(bam)s 
                        --name %(name)s 
                        >& %(outfile)s'''  
