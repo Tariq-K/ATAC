@@ -361,7 +361,7 @@ def macs2Predictd(infile, outfile):
 
     job_threads = "4"
     
-    options = PARAMS["macs2_options"]
+    options = PARAMS["macs2_se_options"]
     outdir = os.path.dirname(outfile)
 
     if BamTools.isPaired(infile):
@@ -417,13 +417,12 @@ def macs2callpeaks(infiles, outfile):
 
     if BamTools.isPaired(bam):
 
-        options = PARAMS["macs2_options"]
+        options = PARAMS["macs2_pe_options"]
         name = os.path.basename(outfile).split(".")[0]
         
         statement='''macs2 callpeak 
-                       --outdir macs2.dir 
-                       --nomodel 
-                       --extsize 147                 
+                       --format BAMPE
+                       --outdir macs2.dir                  
                        %(options)s 
                        --treatment %(bam)s 
                        --name %(name)s 
@@ -445,7 +444,7 @@ def macs2callpeaks(infiles, outfile):
         # run macs2 callpeak
         job_threads = "5"
 
-        options = PARAMS["macs2_options"]
+        options = PARAMS["macs2_se_options"]
         name = os.path.basename(outfile).split(".")[0]
         tmp_dir = "$SCRATCH_DIR"
 
@@ -469,7 +468,8 @@ def macs2callpeaks(infiles, outfile):
 def getChIPblacklist(infile, outfile):
     '''Get Ensembl ChIP blacklisted regions'''
 
-    statement = '''wget -O %(outfile)s http://mitra.stanford.edu/kundaje/akundaje/release/blacklists/mm10-mouse/mm10.blacklist.bed.gz'''
+    chip_blacklist = PARAMS["peak_filter_chip_blacklist"]
+    statement = '''wget -O %(outfile)s %(chip_blacklist)s'''
 
     P.run()
 
@@ -477,11 +477,10 @@ def getChIPblacklist(infile, outfile):
 @follows(getChIPblacklist)
 @files(None, "blacklist_atac.mm10.bed.gz")
 def getATACblacklist(infile, outfile):
-    '''Get ATAC blacklist regions from https://sites.google.com/site/atacseqpublic/ forum'''
-    
-    statement = '''wget -q
-    https://sites.google.com/site/atacseqpublic/atac-seq-analysis-methods/mitochondrialblacklists-1/JDB_blacklist.mm10.bed?attredirects=0&d=1 | 
-    gzip - > %(outfile)s'''
+    '''Get ATAC blacklist regions'''
+
+    atac_blacklist = PARAMS["peak_filter_atac_blacklist"]
+    statement = '''wget -q %(atac_blacklist)s | gzip - > %(outfile)s'''
 
     P.run()
 
