@@ -103,6 +103,8 @@ import sqlite3
 import CGAT.Experiment as E
 import CGATPipelines.Pipeline as P
 import CGAT.BamTools as BamTools
+import re
+import glob
 
 # load options from the config file
 PARAMS = P.getParameters(
@@ -152,10 +154,36 @@ def connect():
 
     return dbh
 
+def isPaired(files):
+    '''Check whether input files are single or paired end
+       Note: this is dependent on files having correct suffix'''
+    
+    paired = []
+
+    for fastq in files:
+        Fpair = re.findall(".*.fastq.1.gz", fastq)
+        paired = paired + Fpair
+
+    if len(paired)==0:
+        unpaired = True
+
+    else:
+        unpaired = False
+    
+    return unpaired
 
 # ---------------------------------------------------
 # Specific pipeline tasks
 
+# Configure pipeline for paired or single end data
+
+Unpaired = isPaired(glob.glob("data.dir/*fastq*gz"))
+
+# if len(PARAMS["bowtie2_unpaired"])==0:
+#        pass
+# else:
+#        Unpaired = PARAMS["bowtie2_unpaired"]
+       
 #####################################################
 ####                Mapping                      ####
 #####################################################
@@ -352,6 +380,7 @@ def mapping():
 ####################################################
 #####              Peakcalling                 #####
 ####################################################
+@active_if(Unpaired)
 @follows(mapping, mkdir("macs2.dir"))
 @transform("bowtie2.dir/*.prep.bam",
            regex("bowtie2.dir/(.*).prep.bam"),
@@ -364,22 +393,17 @@ def macs2Predictd(infile, outfile):
     options = PARAMS["macs2_se_options"]
     outdir = os.path.dirname(outfile)
 
-    if BamTools.isPaired(infile):
-        statement = '''echo " " > %(outfile)s'''
-
-    else:
-        statement = '''macs2 predictd 
-                         --format BAM 
-                         --ifile %(infile)s 
-                         --outdir %(outdir)s 
-                         --verbose 2 %(options)s 
-                         2> %(outfile)s'''
-
-    print statement
+    statement = '''macs2 predictd 
+                     --format BAM 
+                     --ifile %(infile)s 
+                     --outdir %(outdir)s 
+                     --verbose 2 %(options)s 
+                     2> %(outfile)s'''
 
     P.run()
 
     
+@active_if(Unpaired)
 @transform(macs2Predictd, suffix(r".fragment_size.tsv"), r".fragment_size.txt")
 def getFragmentSize(infile, outfile):
     '''Get fragment sizes from macs2 predictd'''
@@ -400,22 +424,20 @@ def getFragmentSize(infile, outfile):
     P.run()
 
     
+@active_if(Unpaired)
 @transform(getFragmentSize, suffix(r".txt"), r".load")
 def loadgetFragmentSize(infile, outfile):
     P.load(infile, outfile, options='-H "sample, tag_size"')
 
-    
+
 @follows(loadgetFragmentSize)
 @transform(removeDuplicates,
            regex("bowtie2.dir/(.*).prep.bam"),
-           add_inputs(r"macs2.dir/\1.macs2.fragment_size.txt"),
            r"macs2.dir/\1.macs2.log")
-def macs2callpeaks(infiles, outfile):
+def macs2callpeaks(infile, outfile):
     '''call peaks with macs2'''
 
-    bam, fragment_size = infiles
-
-    if BamTools.isPaired(bam):
+    if BamTools.isPaired(infile):
 
         options = PARAMS["macs2_pe_options"]
         name = os.path.basename(outfile).split(".")[0]
@@ -423,13 +445,15 @@ def macs2callpeaks(infiles, outfile):
         statement='''macs2 callpeak 
                        --outdir macs2.dir                  
                        %(options)s 
-                       --treatment %(bam)s 
+                       --treatment %(infile)s 
                        --name %(name)s 
                        >& %(outfile)s'''  
 
     else:
         # get macs2 predictd fragment lengths from csvdb
-        table = os.path.basename(fragment_size).rstrip(".txt").replace("-", "_").replace(".", "_")
+        "macs2.dir/\1.macs2.fragment_size.txt"
+        table = os.path.basename(infile).replace(".fastq.1.gz", ".macs2.fragment_size").replace("-", "_").replace(".", "_")
+        # table = os.path.basename(fragment_size).rstrip(".txt").replace("-", "_").replace(".", "_")
 
         query = '''select tag_size from %(table)s ''' % locals()
 
@@ -450,7 +474,7 @@ def macs2callpeaks(infiles, outfile):
         statement='''macs2 callpeak 
                        --outdir macs2.dir 
                        %(options)s 
-                       --treatment %(bam)s 
+                       --treatment %(infile)s 
                        --name %(name)s 
                        >& %(outfile)s'''  
 
