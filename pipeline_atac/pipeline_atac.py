@@ -266,7 +266,7 @@ def mapBowtie2_SE(infile, outfile):
 def filterBam(infile, outfile):
     '''filter bams on MAPQ >10, & remove reads mapping to chrM before peakcalling'''
 
-    job_memory = "5G"
+    job_memory = "10G"
     job_threads = "2"
 
     local_tmpdir = "$SCRATCH_DIR"
@@ -323,8 +323,45 @@ def indexBam(infile, outfile):
 
     P.run()
 
-    
 @follows(indexBam)
+@transform("bowtie2.dir/*.genome.bam",
+           regex(r"(.*).genome.bam"),
+           r"\1.contigs.counts")
+def contigReadCounts(infile, outfile):
+    '''count reads mapped to each contig'''
+
+    tmp_dir = "$SCRATCH_DIR"
+    name = os.path.basename(infile).rstrip(".bam")
+    
+    statement =  '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint ;
+                    samtools idxstats %(infile)s > $tmp; checkpoint;
+                    awk 'BEGIN {OFS="\\t"} {print $0,"%(name)s"}' $tmp > %(outfile)s; checkpoint;
+                    rm $tmp'''
+
+    print statement
+
+    P.run()
+
+# @transform(contigReadCounts, suffix(r".counts"), r".load")
+# def loadcontigReadCounts(infile, outfile):
+#     P.load(infile, outfile, options='-H "contig,length,mapped_reads,unmapped_reads,sample_id" ')
+
+@follows(contigReadCounts)
+@merge("bowtie2.dir/*.contigs.counts", "allContig.counts")
+def mergeContigCounts(infiles, outfile):
+
+    infiles = ' '.join(infiles)
+    
+    statement = '''cat %(infiles)s > %(outfile)s'''
+
+    P.run()
+
+@transform(mergeContigCounts, suffix(r".counts"), r".load")
+def loadmergeContigCounts(infile, outfile):
+    P.load(infile, outfile, options='-H "contig,length,mapped_reads,unmapped_reads,sample_id" ')
+
+    
+@follows(loadmergeContigCounts)
 @transform("bowtie2.dir/*.bam", suffix(r".bam"), r".flagstats.txt")
 def flagstatBam(infile, outfile):
     '''get samtools flagstats for bams'''
@@ -338,8 +375,8 @@ def flagstatBam(infile, outfile):
 
 @follows(flagstatBam)
 @transform("bowtie2.dir/*.bam",
-           regex(r"(.*).bam"),
-           r"\1.picardAlignmentStats.txt")
+           regex(r"(\S+)\.(.*).bam"),
+           r"\1_\2.picardAlignmentStats.txt")
 def picardAlignmentSummary(infile, outfile):
     '''get aligntment summary stats with picard'''
 
@@ -348,6 +385,8 @@ def picardAlignmentSummary(infile, outfile):
 
     job_threads = "4"
     job_memory = "5G"
+
+#    outfile = "bowtie2.dir/" + '_'.join(os.path.basename(outfile).split(".")[0:2]) + ".picardAlignmentStats.txt"
     
     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint ;
                    CollectAlignmentSummaryMetrics
@@ -371,8 +410,60 @@ def loadpicardAlignmentSummary(infiles, outfile):
                          cat="sample_id",
                          options='-i "sample_id"')
 
+
+@follows(flagstatBam)
+@transform("bowtie2.dir/*.bam",
+           regex(r"(\S+)\.(.*).bam"),
+           r"\1_\2.picardInsertSizeMetrics.txt")
+def picardInsertSizes(infile, outfile):
+    '''get aligntment summary stats with picard'''
+
+    tmp_dir = "$SCRATCH_DIR"
     
-@follows(loadpicardAlignmentSummary)
+    job_threads = "8"
+    job_memory = "10G"
+
+    pdf = outfile.replace("Metrics.txt", "Histogram.pdf")
+    histogram = outfile.replace("Metrics.txt", "Histogram.txt")
+    
+    statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint ;
+                   CollectInsertSizeMetrics
+                     I=%(infile)s 
+                     O=$tmp
+                     H=%(pdf)s
+                     M=0.5; checkpoint ;
+                   cat $tmp | grep -A`wc -l $tmp | tr "[[:blank:]]" "\\n" | head -n 1` "## HISTOGRAM" $tmp | grep -v "#" > %(histogram)s; checkpoint;
+                   cat $tmp | grep -A 2 "## METRICS CLASS" $tmp | grep -v "#" > %(outfile)s; checkpoint;
+                   rm $tmp'''
+
+    print statement
+
+    P.run()
+
+@merge(picardInsertSizes,
+       "picardInsertSizeMetrics.load")
+def loadpicardInsertSizeMetrics(infiles, outfile):
+    '''load the insert size metrics to a single table in the db'''
+
+    P.concatenateAndLoad(infiles, outfile,
+                         regex_filename=".*/(.*).picardInsertSizeMetrics",
+                         cat="sample_id",
+                         options='-i "sample_id"')
+
+
+@follows(picardInsertSizes)
+@merge("bowtie2.dir/*.picardInsertSizeHistogram.txt",
+       "picardInsertSizeHistogram.load")
+def loadpicardInsertSizeHistogram(infiles, outfile):
+    '''load the insert size metrics to a single table in the db'''
+
+    P.concatenateAndLoad(infiles, outfile,
+                         regex_filename=".*/(.*).picardInsertSizeHistogram",
+                         cat="sample_id",
+                         options='-i "sample_id"')
+
+    
+@follows(loadpicardAlignmentSummary, loadpicardInsertSizeMetrics, loadpicardInsertSizeHistogram)
 def mapping():
     pass
 
@@ -586,21 +677,66 @@ def bamCoverage(infile, outfile):
     
     P.run()
 
+
+@follows(indexPrepBam)
+@transform("bowtie2.dir/*.prep.bam",
+           regex(r"bowtie2.dir/(.*).prep.bam"),
+           r"deeptools.dir/\1.coverage.sizeFilt.bw")
+def bamCoverage_sizeFilter(infile, outfile):
+    '''Make normalised bigwig tracks with deeptools'''
+
+    job_memory = "2G"
+    job_threads = "10"
+
+    if BamTools.isPaired(infile):
+
+        # PE reads filtered on sam flag 66 -> include only first read in properly mapped pairs
+        
+        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
+                    --binSize 5
+                    --maxFragmentLength 200
+                    --smoothLength 20
+                    --centerReads
+                    --normalizeUsingRPKM
+                    --samFlagInclude 66
+                    -p "max"'''
+        
+    else:
+
+        # SE reads filtered on sam flag 4 -> exclude unmapped reads
+        
+        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
+                    --binSize 5
+                    --maxFragmentLength 200
+                    --smoothLength 20
+                    --centerReads
+                    --normalizeUsingRPKM
+                    --samFlagExclude 4
+                    -p "max"'''
+
+    # added smoothLength = 20 to try and get better looking plots...
+    # --minMappingQuality 10 optional argument, but unnecessary as bams are alredy filtered
+    # centerReads option and small binsize should increase resolution around enriched areas
+
+    print statement
+    
+    P.run()
+
 # @follows(bamCoverage)
-# @transform("deeptools.dir/*_1.coverage.bw",
-#            regex(r"(.*)_1.coverage.bw"),
+# @transform("deeptools.dir/*.coverage.bw",
+#            regex(r"(.*).coverage.bw"),
 #            r"\1.merge.bdg")
-# def mergeBWreps(infile, outfile):
+# def mergeBWreps(infiles, outfile):
 #     '''merge replicates to one BW for IGV visualisation'''
 
-#     bw1 = infile
-#     bw2 = bw1.replace("_1.coverage.bw", "_2.coverage.bw")
-#     bw3 = bw1.replace("_1.coverage.bw", "_3.coverage.bw")
+#     # bw1 = infile
+#     # bw2 = bw1.replace("_1.coverage.bw", "_2.coverage.bw")
+#     # bw3 = bw1.replace("_1.coverage.bw", "_3.coverage.bw")
 
 #     tmp_dir = "$SCRATCH_DIR"
     
 #     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
-#                    bigWigMerge %(bw1)s %(bw2)s %(bw3)s $tmp; checkpoint;
+#                    bigWigMerge %(bws)s $tmp; checkpoint;
 #                    sort -k1,1 -k2,2n $tmp > %(outfile)s'''
 
 #     print statement
@@ -618,12 +754,247 @@ def bamCoverage(infile, outfile):
 #     print statement
 
 #     P.run()
-
-
-@follows(bamCoverage)
+    
+@follows(bamCoverage, bamCoverage_sizeFilter)
 def coverage():
     pass
 
+#########################################################
+############ Count reads in BED intervals   #############
+#########################################################
+def generate_scoreIntervalsBAM_jobs():
+
+    intervals = glob.glob("macs2.dir/*_peaks.narrowPeak")
+    bams = glob.glob("bowtie2.dir/*.prep.bam")
+
+    
+    
+    # hack, delete this
+    filt = glob.glob("bowtie2.dir/*0[1-4].prep.bam")
+    bams = [x for x in bams if x not in filt]
+
+    
+    outDir = "BAM_counts.dir/"
+
+    for interval in intervals:
+        ifile = [i.split("/")[-1].rstrip("_peaks.narrowPeak") for i in [interval] ]
+
+        for bam in bams:
+            bam_sample = bam.split("/")[-1].rstrip(".prep.bam")
+
+            if bam_sample in interval:
+                bfile = [b.split("/")[-1][:-len(".prep.bam")] for b in [bam] ]
+
+                bedfile = ' '.join(str(x) for x in ifile )
+                bamfile = ' '.join(str(x) for x in bfile )
+            
+                output = outDir + bedfile + "_bamcounts" + ".txt"
+                
+                yield ( [ [interval, bam], output ] )
+    
+#@follows(mkdir("BAM_counts.dir"), indexBAM)
+@files(generate_scoreIntervalsBAM_jobs)
+def scoreIntervalsBAM(infiles, outfile):
+    '''use bedtools to count reads in bed intervals'''
+
+    interval, bam = infiles
+
+    # if BamTools.isPaired(bam):
+    #     mode = "PE"
+    #     print mode
+    #     statement = '''python /gfs/devel/tkhoyratty/cgat/scripts/bed2gff.py -a  -I %(interval)s                     
+    #     | python /gfs/devel/tkhoyratty/cgat/scripts/gtf2table.py -b %(bam)s
+    #     -c 'readpair-counts'                                                                                                       
+    #     > %(outfile)s''' % locals()
+    # else:
+    #     mode = "SE"
+    #     print mode
+    #     statement = '''python /gfs/devel/tkhoyratty/cgat/scripts/bed2gff.py -a  -I %(interval)s                     
+    #     | python /gfs/devel/tkhoyratty/cgat/scripts/gtf2table.py -b %(bam)s
+    #     -c 'read-counts'                                                                                                       
+    #     > %(outfile)s''' % locals()
+
+    if BamTools.isPaired(bam):
+         # -p flag specifes only to count paired reads
+
+        statement = '''bedtools multicov -p -q 10 -bams %(bam)s 
+                    -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' %(interval)s ) 
+                    > %(outfile)s 
+                    && sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\ttotal' 
+                    %(outfile)s''' % locals()
+
+    else:
+
+         statement = '''bedtools multicov -q 10 -bams %(bam)s 
+                     -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' %(interval)s ) 
+                     > %(outfile)s 
+                     && sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\ttotal' 
+                     %(outfile)s''' % locals()
+
+    print statement
+         
+    P.run()
+
+                 
+
+@transform(scoreIntervalsBAM, suffix(".txt"), ".load")
+def loadIntervalscoresBAM(infile, outfile):
+    P.load(infile, outfile, options='-i "peak_id"')
+
+def generator_BAMtotalcounts():
+
+    bams = glob.glob("bowtie2.dir/*prep.bam")
+
+    # hack, delete this
+    filt = glob.glob("bowtie2.dir/*0[1-4].prep.bam")
+    bams = [x for x in bams if x not in filt]
+
+
+    outDir = "BAM_counts.dir"
+
+    for bam in bams:
+        bfile = bam.split("/")[-1][:-len(".prep.bam")]
+        bfile = ''.join(bfile)
+        output = outDir + "/" + bfile + "_total_reads.txt"
+        
+        yield ( [ bam, output ] )
+
+#@follows(loadIntervalscoresBAM)
+@files(generator_BAMtotalcounts)
+def BAMtotalcounts(infile, outfile):
+    '''Count total reads in BAM for normalisation'''
+
+    if BamTools.isPaired(infile):
+        statement = '''samtools view -f 2 %(infile)s | wc -l | awk 'BEGIN {OFS="\\t"} {print $0/2}' > %(outfile)s''' % locals()
+        # count only reads mapped in proper pairs
+    else:
+        statement = '''samtools view -F 4 %(infile)s | wc -l  | awk 'BEGIN {OFS="\\t"} {print $0}' > %(outfile)s''' % locals()
+        # exclude unmapped reads
+    print statement
+    P.run()
+
+@follows(BAMtotalcounts)
+@transform(scoreIntervalsBAM,
+         regex(r"BAM_counts.dir/(.*)_bamcounts.txt"),
+         add_inputs(r"BAM_counts.dir/\1_total_reads.txt"),
+         r"BAM_counts.dir/\1_norm_counts.txt")
+def normaliseBAMcounts(infiles, outfile):
+    '''normalise BAM counts for file size'''
+    bam_counts, total_reads = infiles
+    
+    db_name = os.path.basename(bam_counts)
+    db_name = db_name.replace("-", "_")
+    db_name = db_name[:-len(".txt")]
+                      
+    name = os.path.basename(total_reads)
+    name = name[:-len(".txt")]
+    
+    # read counts to dictionary
+    total_reads = open(total_reads, "r").read().replace("\n", "")
+    counts = {}
+    counts[name] = total_reads
+    counts_str = counts[name]
+
+    dbhandle = sqlite3.connect(PARAMS["general_database"])
+    cc = dbhandle.cursor()
+    db = PARAMS["general_database"]
+    attach_statement = '''attach %(db)s as db''' % locals()
+    cc.execute(attach_statement)
+    query =  '''select peak_id, total from %(db_name)s''' % locals()
+    sql_result = cc.execute(query).fetchall()
+    cc.close()
+
+    ### sql_result is returned as a list of tuples ###
+    tmp = outfile + "_tmp"
+    
+    # convert to df & write file
+    o = open(tmp, "w")
+    o.write("\t".join (
+        ["peak_id","total"]) + "\n")
+
+    for r in sql_result:
+        peak_id, total = r[0:2]
+
+        columns = [str(x) for x in [
+            peak_id, total ] ]
+
+        o.write("\t".join ( columns ) + "\n")
+    o.close()
+
+    statement = '''awk 'BEGIN {OFS="\\t"} {print $1,$2,$2/%(counts_str)s,$2/%(counts_str)s*1000000}' < %(tmp)s |
+                     sed 's/^peak_id\\ttotal\\t0\\t0/peak_id\\traw_counts\\tnorm_counts\\tRPM/' 
+                     > %(outfile)s; checkpoint; 
+                   rm %(tmp)s'''
+
+    print statement
+    P.run()
+        
+@transform(normaliseBAMcounts, suffix(".txt"), ".load")
+def loadnormaliseBAMcounts(infiles, outfiles):
+    P.load(infiles, outfiles)    
+
+@follows(mkdir("FRiP.dir/"), loadnormaliseBAMcounts)
+@transform(normaliseBAMcounts,
+           regex(r"BAM_counts.dir/(.*)_norm_counts.txt"),
+           add_inputs(r"BAM_counts.dir/\1_total_reads.txt"),
+           r"FRiP.dir/\1_frip.txt")
+def FRIP(infiles, outfile):
+    '''Calculate fraction of read in peaks'''
+
+    bam_counts, total_reads = infiles
+
+    db_name = os.path.basename(bam_counts)
+    db_name = db_name.replace("-", "_")
+    db_name = db_name[:-len(".txt")]
+                      
+    name = os.path.basename(total_reads)
+    name = name[:-len(".txt")]
+    
+    # read counts to dictionary
+    total_reads = open(total_reads, "r").read().replace("\n", "")
+    counts = {}
+    counts[name] = total_reads
+    counts_int = counts[name]
+    
+    dbhandle = sqlite3.connect(PARAMS["general_database"])
+    cc = dbhandle.cursor()
+    db = PARAMS["general_database"]
+    attach_statement = '''attach %(db)s as db''' % locals()
+    cc.execute(attach_statement)
+    query =  '''select sum(raw_counts) from %(db_name)s''' % locals()
+    sql_result = cc.execute(query).fetchall()
+    cc.close()
+
+    # sql_result contains a list of 1 tuple (with 1 value),
+    # iterate over list and slice tuple
+    for x in sql_result:
+        result = x[0]
+    
+    # convert bam counts to int
+    counts_int = float(counts_int)
+    
+    FRIP = (result/counts_int)
+    FRIP = str(FRIP)
+
+    table_name = P.snip(name, "_total_reads")
+    o = open(outfile, "w")
+    columns = [str(x) for x in [table_name, FRIP]]
+    o.write("\t".join ( columns ) + "\n")
+    o.close()
+
+@collate(FRIP,
+         regex("FRiP.dir/(.*).txt"),
+         r"FRiP.dir/frip_table.txt")
+def FRIP_summary(infiles, outfile):
+    
+    statement = '''cat FRiP.dir/*txt | sed '1i \sample\tFRiP' | tr [[:blank:]] "\\t" > %(outfile)s'''
+    print statement
+    P.run()
+
+@transform(FRIP_summary,
+           suffix(".txt"), ".load")
+def loadFRIP(infile, outfile):
+    P.load(infile, outfile, options = '-i "sample"')
 
 # ---------------------------------------------------
 # Generic pipeline tasks
