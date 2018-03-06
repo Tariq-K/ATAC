@@ -103,6 +103,7 @@ import sqlite3
 import CGAT.Experiment as E
 import CGATPipelines.Pipeline as P
 import CGAT.BamTools as BamTools
+import CGAT.Database as DB
 import re
 import glob
 
@@ -171,6 +172,121 @@ def isPaired(files):
         unpaired = False
     
     return unpaired
+
+
+def writeGreat(locations,basalup,basaldown,maxext,outfile,half=False):
+    ''' write out a bed file of great promoters from input gene locations
+         locations is [contig,gstart,gend,strand,gene_id] '''
+
+    # Gene regulatory domain definition: 
+    # Each gene is assigned a basal regulatory domain of a 
+    # minimum distance upstream and downstream of the TSS 
+    # (regardless of other nearby genes). 
+    # The gene regulatory domain is extended in both directions 
+    # to the nearest gene's basal domain but no more than the 
+    # maximum extension in one direction
+
+    genome = {}
+    for location in locations:
+        chrom, gstart, gend, strand_int, gid = location
+        if strand_int == -1: 
+            strand = "minus" 
+            tss = gend
+        else: 
+            strand = "plus"
+            tss = gstart
+        record = [tss,strand,gid]
+        if chrom[3:5]=="NT" or chrom[0:2]=="MT": continue
+        if chrom not in genome: 
+            genome[chrom] = [ record ]
+        else: genome[chrom].append(record)
+
+    #add the ends of the chromosomes
+    contigs = gzip.open(PARAMS["annotations_dir"]+"/assembly.dir/contigs.bed.gz","r")
+
+    
+    nmatched = 0
+    for contig_entry in contigs:
+        contig, start, end = contig_entry.strip().split("\t")
+        
+        if contig in genome.keys():
+            genome[contig].append([int(end),"end","end"])
+            nmatched+=1
+    if nmatched < 21:
+        raise ValueError("writeGreat: not enough chromosome ends registered")
+
+    #sort the arrays
+    for key in genome.keys():
+        genome[key].sort( key = lambda entry: entry[0] )
+        
+    #now we can walk over the regions and make the regulatory regions.
+
+    greatBed = []
+   
+    for contig in genome.keys():
+
+        locs = genome[contig]
+        contig_end = locs[-1][0]
+        for i in range(0,len(locs)):
+
+            l,strand,gid = locs[i]
+
+            if strand == "end": continue
+
+            #get the positions of the neighbouring basal domains.
+
+            # - upstream
+            if i == 0: frontstop = 0
+            else:
+                pl, pstrand, pgid = locs[i-1]
+                if pstrand == "plus": frontstop = pl + basaldown
+                else: frontstop = pl + basalup
+            # - downstream
+            nl, nstrand, ngid = locs[i+1]
+            if nstrand == "plus": backstop = nl - basalup
+            else: backstop = nl - basaldown
+
+            # define basal domain
+            if strand=="plus":
+                basalstart = l - basalup
+                basalend = min( l + basaldown, contig_end )
+            else:
+                basalstart = l - basaldown
+                basalend = min( l + basalup, contig_end )
+
+            # upstream extension
+            if frontstop > basalstart:
+                regstart = basalstart
+            else:
+                if half == True:
+                    frontext = min( maxext, (l - frontstop) / 2 )
+                else:
+                    frontext = min( maxext, l - frontstop )
+                regstart = l - frontext
+
+            # downstream extension
+            if backstop < basalend:
+                regend = basalend
+            else:
+                if half == True:
+                    backext = min( maxext, ( backstop - l ) / 2 )
+                else:
+                    backext = min( maxext, backstop - l )
+                regend = l + backext
+
+            greatBed.append(["chr"+contig,str(regstart),str(regend),gid])
+        
+    outfh = open(outfile,"w")
+    outfh.write("\n".join(["\t".join(x) for x in greatBed])+"\n")
+    outfh.close()
+
+
+
+def getTSS(start,end,strand):
+    if strand == 1 or strand == "+": tss = start
+    elif strand == -1 or strand == "-": tss = end
+    else: raise ValueError("getTSS: stand specification not understood")
+    return tss
 
 # ---------------------------------------------------
 # Specific pipeline tasks
@@ -264,19 +380,33 @@ def mapBowtie2_SE(infile, outfile):
 @follows(mapBowtie2_PE, mapBowtie2_SE)
 @transform("bowtie2.dir/*.genome.bam", suffix(r".genome.bam"), r".filt.bam")
 def filterBam(infile, outfile):
-    '''filter bams on MAPQ >10, & remove reads mapping to chrM before peakcalling'''
+    '''filter bams on MAPQ >10, & remove reads mapping to chrM before peakcalling.
+       Optionally filter reads based on insert size (max size specified in ini)'''
 
     job_memory = "10G"
     job_threads = "2"
 
     local_tmpdir = "$SCRATCH_DIR"
 
+    insert_size_filter_F = PARAMS["bowtie2_insert_size"]
+    insert_size_filter_R = "-" + str(insert_size_filter_F) # reverse reads have "-" prefix for TLEN
+
+    if len(str(insert_size_filter_F))==0:
+        options = ''' '''
+    else:
+        options = '''awk 'BEGIN {OFS="\\t"} {if ($9 ~ /^-/ && $9 > %(insert_size_filter_R)s) print $0;
+                       else if ($9 ~ /^[0-9]/ && $9 < %(insert_size_filter_F)s) print $0}' | ''' % locals()
+        
     statement = '''tmp=`mktemp -p %(local_tmpdir)s`; checkpoint ;
-                   samtools view -h -q10 %(infile)s | 
+                   head=`mktemp -p %(local_tmpdir)s`; checkpoint ;
+                   samtools view -h %(infile)s | grep "^@" - > $head ; checkpoint ; 
+                   samtools view -q10 %(infile)s | 
                      grep -v "chrM" - | 
+                     %(options)s 
+                     cat $head - |
                      samtools view -h -o $tmp - ; checkpoint ;
                    samtools sort -O BAM -o %(outfile)s $tmp ; checkpoint ;
-                   rm $tmp''' % locals()
+                   rm $tmp $head''' % locals()
 
     print statement
 
@@ -689,12 +819,10 @@ def bamCoverage_sizeFilter(infile, outfile):
     job_threads = "10"
 
     if BamTools.isPaired(infile):
-
-        # PE reads filtered on sam flag 66 -> include only first read in properly mapped pairs
         
         statement = '''bamCoverage -b %(infile)s -o %(outfile)s
                     --binSize 5
-                    --maxFragmentLength 200
+                    --maxFragmentLength 150
                     --smoothLength 20
                     --centerReads
                     --normalizeUsingRPKM
@@ -702,78 +830,28 @@ def bamCoverage_sizeFilter(infile, outfile):
                     -p "max"'''
         
     else:
-
-        # SE reads filtered on sam flag 4 -> exclude unmapped reads
         
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --maxFragmentLength 200
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsingRPKM
-                    --samFlagExclude 4
-                    -p "max"'''
+        statement = '''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > %(outfile)'''
 
-    # added smoothLength = 20 to try and get better looking plots...
-    # --minMappingQuality 10 optional argument, but unnecessary as bams are alredy filtered
-    # centerReads option and small binsize should increase resolution around enriched areas
 
     print statement
     
     P.run()
 
-# @follows(bamCoverage)
-# @transform("deeptools.dir/*.coverage.bw",
-#            regex(r"(.*).coverage.bw"),
-#            r"\1.merge.bdg")
-# def mergeBWreps(infiles, outfile):
-#     '''merge replicates to one BW for IGV visualisation'''
-
-#     # bw1 = infile
-#     # bw2 = bw1.replace("_1.coverage.bw", "_2.coverage.bw")
-#     # bw3 = bw1.replace("_1.coverage.bw", "_3.coverage.bw")
-
-#     tmp_dir = "$SCRATCH_DIR"
-    
-#     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
-#                    bigWigMerge %(bws)s $tmp; checkpoint;
-#                    sort -k1,1 -k2,2n $tmp > %(outfile)s'''
-
-#     print statement
-
-#     P.run()
-
-# @transform(mergeBWreps, suffix(r".bdg"), r".bw")
-# def BW2BDG(infile, outfile):
-#     '''convert bedgraph back to bigwig'''
-
-#     chrom_sizes = PARAMS["annotations_chrom_sizes"]
-    
-#     statement = '''bedGraphToBigWig %(infile)s %(chrom_sizes)s %(outfile)s'''
-
-#     print statement
-
-#     P.run()
     
 @follows(bamCoverage, bamCoverage_sizeFilter)
 def coverage():
     pass
 
-#########################################################
-############ Count reads in BED intervals   #############
-#########################################################
-def generate_scoreIntervalsBAM_jobs():
+
+########################################################
+####                    FRIP                        ####
+########################################################
+def generate_FRIPcountBAM_jobs():
 
     intervals = glob.glob("macs2.dir/*_peaks.narrowPeak")
     bams = glob.glob("bowtie2.dir/*.prep.bam")
-
-    
-    
-    # hack, delete this
-    filt = glob.glob("bowtie2.dir/*0[1-4].prep.bam")
-    bams = [x for x in bams if x not in filt]
-
-    
+        
     outDir = "BAM_counts.dir/"
 
     for interval in intervals:
@@ -788,31 +866,17 @@ def generate_scoreIntervalsBAM_jobs():
                 bedfile = ' '.join(str(x) for x in ifile )
                 bamfile = ' '.join(str(x) for x in bfile )
             
-                output = outDir + bedfile + "_bamcounts" + ".txt"
+                output = outDir + bedfile + "_fripcounts" + ".txt"
                 
                 yield ( [ [interval, bam], output ] )
+                
     
-#@follows(mkdir("BAM_counts.dir"), indexBAM)
-@files(generate_scoreIntervalsBAM_jobs)
-def scoreIntervalsBAM(infiles, outfile):
+@follows(mkdir("BAM_counts.dir"), coverage)
+@files(generate_FRIPcountBAM_jobs)
+def FRIPcountBAM(infiles, outfile):
     '''use bedtools to count reads in bed intervals'''
 
     interval, bam = infiles
-
-    # if BamTools.isPaired(bam):
-    #     mode = "PE"
-    #     print mode
-    #     statement = '''python /gfs/devel/tkhoyratty/cgat/scripts/bed2gff.py -a  -I %(interval)s                     
-    #     | python /gfs/devel/tkhoyratty/cgat/scripts/gtf2table.py -b %(bam)s
-    #     -c 'readpair-counts'                                                                                                       
-    #     > %(outfile)s''' % locals()
-    # else:
-    #     mode = "SE"
-    #     print mode
-    #     statement = '''python /gfs/devel/tkhoyratty/cgat/scripts/bed2gff.py -a  -I %(interval)s                     
-    #     | python /gfs/devel/tkhoyratty/cgat/scripts/gtf2table.py -b %(bam)s
-    #     -c 'read-counts'                                                                                                       
-    #     > %(outfile)s''' % locals()
 
     if BamTools.isPaired(bam):
          # -p flag specifes only to count paired reads
@@ -836,19 +900,14 @@ def scoreIntervalsBAM(infiles, outfile):
     P.run()
 
                  
-
-@transform(scoreIntervalsBAM, suffix(".txt"), ".load")
-def loadIntervalscoresBAM(infile, outfile):
+@transform(FRIPcountBAM, suffix(".txt"), ".load")
+def loadFRIPcountBAM(infile, outfile):
     P.load(infile, outfile, options='-i "peak_id"')
 
+    
 def generator_BAMtotalcounts():
 
     bams = glob.glob("bowtie2.dir/*prep.bam")
-
-    # hack, delete this
-    filt = glob.glob("bowtie2.dir/*0[1-4].prep.bam")
-    bams = [x for x in bams if x not in filt]
-
 
     outDir = "BAM_counts.dir"
 
@@ -859,7 +918,8 @@ def generator_BAMtotalcounts():
         
         yield ( [ bam, output ] )
 
-#@follows(loadIntervalscoresBAM)
+        
+@follows(loadFRIPcountBAM)
 @files(generator_BAMtotalcounts)
 def BAMtotalcounts(infile, outfile):
     '''Count total reads in BAM for normalisation'''
@@ -867,77 +927,21 @@ def BAMtotalcounts(infile, outfile):
     if BamTools.isPaired(infile):
         statement = '''samtools view -f 2 %(infile)s | wc -l | awk 'BEGIN {OFS="\\t"} {print $0/2}' > %(outfile)s''' % locals()
         # count only reads mapped in proper pairs
+
     else:
         statement = '''samtools view -F 4 %(infile)s | wc -l  | awk 'BEGIN {OFS="\\t"} {print $0}' > %(outfile)s''' % locals()
         # exclude unmapped reads
-    print statement
-    P.run()
-
-@follows(BAMtotalcounts)
-@transform(scoreIntervalsBAM,
-         regex(r"BAM_counts.dir/(.*)_bamcounts.txt"),
-         add_inputs(r"BAM_counts.dir/\1_total_reads.txt"),
-         r"BAM_counts.dir/\1_norm_counts.txt")
-def normaliseBAMcounts(infiles, outfile):
-    '''normalise BAM counts for file size'''
-    bam_counts, total_reads = infiles
-    
-    db_name = os.path.basename(bam_counts)
-    db_name = db_name.replace("-", "_")
-    db_name = db_name[:-len(".txt")]
-                      
-    name = os.path.basename(total_reads)
-    name = name[:-len(".txt")]
-    
-    # read counts to dictionary
-    total_reads = open(total_reads, "r").read().replace("\n", "")
-    counts = {}
-    counts[name] = total_reads
-    counts_str = counts[name]
-
-    dbhandle = sqlite3.connect(PARAMS["general_database"])
-    cc = dbhandle.cursor()
-    db = PARAMS["general_database"]
-    attach_statement = '''attach %(db)s as db''' % locals()
-    cc.execute(attach_statement)
-    query =  '''select peak_id, total from %(db_name)s''' % locals()
-    sql_result = cc.execute(query).fetchall()
-    cc.close()
-
-    ### sql_result is returned as a list of tuples ###
-    tmp = outfile + "_tmp"
-    
-    # convert to df & write file
-    o = open(tmp, "w")
-    o.write("\t".join (
-        ["peak_id","total"]) + "\n")
-
-    for r in sql_result:
-        peak_id, total = r[0:2]
-
-        columns = [str(x) for x in [
-            peak_id, total ] ]
-
-        o.write("\t".join ( columns ) + "\n")
-    o.close()
-
-    statement = '''awk 'BEGIN {OFS="\\t"} {print $1,$2,$2/%(counts_str)s,$2/%(counts_str)s*1000000}' < %(tmp)s |
-                     sed 's/^peak_id\\ttotal\\t0\\t0/peak_id\\traw_counts\\tnorm_counts\\tRPM/' 
-                     > %(outfile)s; checkpoint; 
-                   rm %(tmp)s'''
 
     print statement
-    P.run()
-        
-@transform(normaliseBAMcounts, suffix(".txt"), ".load")
-def loadnormaliseBAMcounts(infiles, outfiles):
-    P.load(infiles, outfiles)    
 
-@follows(mkdir("FRiP.dir/"), loadnormaliseBAMcounts)
-@transform(normaliseBAMcounts,
-           regex(r"BAM_counts.dir/(.*)_norm_counts.txt"),
+    P.run()
+
+
+@follows(mkdir("FRIP.dir/"), BAMtotalcounts)
+@transform(FRIPcountBAM,
+           regex(r"BAM_counts.dir/(.*)_fripcounts.txt"),
            add_inputs(r"BAM_counts.dir/\1_total_reads.txt"),
-           r"FRiP.dir/\1_frip.txt")
+           r"FRIP.dir/\1_frip.txt")
 def FRIP(infiles, outfile):
     '''Calculate fraction of read in peaks'''
 
@@ -961,7 +965,7 @@ def FRIP(infiles, outfile):
     db = PARAMS["general_database"]
     attach_statement = '''attach %(db)s as db''' % locals()
     cc.execute(attach_statement)
-    query =  '''select sum(raw_counts) from %(db_name)s''' % locals()
+    query =  '''select sum(total) from %(db_name)s''' % locals()
     sql_result = cc.execute(query).fetchall()
     cc.close()
 
@@ -982,6 +986,7 @@ def FRIP(infiles, outfile):
     o.write("\t".join ( columns ) + "\n")
     o.close()
 
+    
 @collate(FRIP,
          regex("FRiP.dir/(.*).txt"),
          r"FRiP.dir/frip_table.txt")
@@ -991,14 +996,393 @@ def FRIP_summary(infiles, outfile):
     print statement
     P.run()
 
+    
 @transform(FRIP_summary,
            suffix(".txt"), ".load")
 def loadFRIP(infile, outfile):
     P.load(infile, outfile, options = '-i "sample"')
 
+
+@follows(loadFRIP)
+def frip():
+    pass
+
+
+########################################################
+####                  Merge Peaks                   ####
+########################################################
+@follows(frip)
+@merge("macs2.dir/*_peaks.filt.bed", "BAM_counts.dir/merged_peaks.bed")
+def mergePeaks(infiles, outfile):
+    '''cat all peak files, center over peak summit +/- 250 b.p., then merge peaks'''
+
+    infiles = ' '.join(infiles)
+    tmp_dir = "$SCRATCH_DIR"
+#    window_size = PARAMS[]
+    
+    statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+                   cat %(infiles)s | grep -v ^chrUn* -  > $tmp; checkpoint;
+                   awk 'BEGIN {OFS="\\t"} {center = $2 + $10 ; start = center - 250 ; end = center + 250 ;
+                     print $1,start,end,$4,$5}' $tmp | 
+                   awk 'BEGIN {OFS="\\t"} {if ($2 < $3) print $0}' - |
+                   sort -k1,1 -k2,2n |
+                   mergeBed -c 4,5 -o count,mean -i - |
+                   awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,"merged_peaks_"NR,$5,$4,$3-$2,($2+$3)/2}' - > %(outfile)s; checkpoint;
+                   rm $tmp'''
+
+    print statement
+
+    P.run()
+
+
+########################################################
+####                GREAT Peak2Gene                 ####
+########################################################
+@follows(mergePeaks, mkdir("annotations.dir"))
+@files(None,"annotations.dir/ensemblGeneset.txt")
+def fetchEnsemblGeneset(infile,outfile):
+    ''' Get the *latest* gene records using biomart. The aim here is NOT to match
+        the great gene set: For that we would only want protein coding genes with
+        GO annotations '''
+
+    statement = '''select gi.gene_id, gi.gene_name,
+                          gs.contig, gs.start, gs.end, gs.strand
+                   from gene_info gi
+                   inner join gene_stats gs
+                   on gi.gene_id=gs.gene_id
+                   where gi.gene_biotype="protein_coding"
+                '''
+
+    anndb = os.path.join(PARAMS["annotations_dir"],
+                         "csvdb")
+
+    df = DB.fetch_DataFrame(statement, anndb)
+    df.to_csv(outfile, index=False, sep="\t", header=True)
+
+    
+@transform(fetchEnsemblGeneset,suffix(".txt"),".load")
+def uploadEnsGenes(infile,outfile):
+    '''Load the ensembl annotation including placeholder GO ID's'''
+    P.load(infile, outfile, options='-i "gene_id" -i "go_id" ')
+
+    
+@follows(uploadEnsGenes)
+def getGeneLists():
+    pass
+
+
+@follows(getGeneLists, mkdir("greatBeds.dir"))
+@files(uploadEnsGenes, "greatBeds.dir/ens_great_prom.bed")
+def greatPromoters(infile,outfile):
+    ''' Make great promoters for the genes retrieved from Ensembl'''
+
+    dbh = sqlite3.connect(PARAMS["database"])
+    cc = dbh.cursor()
+
+    basalup = PARAMS["great_basal_up"]
+    basaldown = PARAMS["great_basal_down"]
+    maxext = PARAMS["great_max"]
+    half = PARAMS["great_half"]  
+    statement = '''select distinct contig, start,                                                                                                         
+                   end, strand, gene_id from ensemblGeneset '''
+
+    result = cc.execute(statement).fetchall()
+    
+    
+    locations = [ [ str(r[0]), int(r[1]), int(r[2]),str(r[3]), str(r[4]) ] 
+                   for r in result ]
+    
+    writeGreat(locations,basalup,basaldown,maxext,outfile,half)
+
+
+@transform(greatPromoters,
+           regex(r"(.*)_prom.bed"),
+           r"\1.bed")
+def filterEnsPromoters(infile,outfile):
+    '''Remove unwanted chromosomes & correct contig column, "chrchr" -> "chr"'''
+
+    tmp_dir = "$SCRATCH_DIR"
+    statement = '''tmp=`mktemp -p %(tmp_dir)s`; 
+                sed 's/chrchr/chr/' %(infile)s > $tmp &&
+                grep -v ^chrM $tmp > %(outfile)s && rm $tmp'''
+
+    print statement
+    
+    P.run()
+
+    
+@transform(filterEnsPromoters,suffix(".bed"),".load")
+def loadGreatPromoters(infile, outfile):
+    '''Load the great promoter regions'''
+    P.load(infile, outfile, options='-H "chr,start,end,gene_id" -i "gene_id"')
+
+    
+@follows(loadGreatPromoters)
+def GreatAnnotation():
+    pass
+
+
+@follows(GreatAnnotation, mkdir("regulated_genes.dir"))
+@transform("BAM_counts.dir/merged_peaks.bed",
+           regex(r"BAM_counts.dir/(.*).bed"),
+           add_inputs("greatBeds.dir/ens_great.bed"),
+           r"regulated_genes.dir/\1.GREAT.txt")
+def regulatedGenes(infiles,outfile):
+    '''Get all genes associated with peaks'''
+
+    infile, greatPromoters = infiles
+
+    # intersect infiles with great gene annotation beds to get peak associated genes
+    statement = '''intersectBed -wa -wb -a <(cut -f1-7 %(infile)s) -b %(greatPromoters)s 
+                | cut -f1-7,11 > %(outfile)s''' % locals()
+
+    # Filter on nearest peak 2 gene later
+
+    print statement
+
+    P.run()
+
+    
+@transform(regulatedGenes, suffix(r".txt"), r".load")
+def loadRegulatedGenes(infile, outfile):
+    P.load(infile, outfile, 
+           options='-H "contig,start,end,peak_id,peak_score,no_peaks,peak_width,peak_centre,gene_id" -i "peak_id"')
+
+    
+@transform(loadRegulatedGenes,
+           suffix(r".load"),
+           add_inputs(loadGreatPromoters,uploadEnsGenes),
+           r".annotated.bed")
+def regulatedTables(infiles, outfile):
+    '''Make an informative table about peaks and "regulated" genes'''
+
+    regulated, great, ensGenes = [ P.toTable(x) for x in infiles ]
+
+    query = '''select distinct r.contig,
+                  r.start, r.end, r.peak_id, r.peak_score,
+                  r.no_peaks, r.peak_width, r.peak_centre,
+                  g.gene_id, e.gene_name, e.strand,
+                  e.start, e.end
+                  from %s as r
+                  inner join %s as g
+                     on g.gene_id = r.gene_id 
+                  inner join %s as e
+                     on g.gene_id = e.gene_id
+                  ''' % (regulated, great, ensGenes)
+
+    print query
+    
+    dbh = sqlite3.connect(PARAMS["database"])
+    cc = dbh.cursor()
+    sqlresult = cc.execute(query).fetchall()
+
+    sql_table = outfile.replace(".bed", ".txt")
+    
+    o = open(sql_table,"w")
+    o.write("\t".join ( 
+            ["chromosome","peak_start","peak_end","peak_id","peak_score",
+             "no_peaks","peak_width","peak_centre",
+             "dist2peak","gene_id", "TSS"]) + "\n" )
+
+    for r in sqlresult:
+        contig, pstart, pend, peak_id, peak_score, no_peaks, peak_width, peak_centre = r[0:8]
+        gene_id, gene_name, gene_strand, gene_start, gene_end = r[8:13]
+        
+        if gene_strand == "+": gstrand = 1
+        else: gstrand = 2
+
+        tss = getTSS(gene_start,gene_end,gene_strand)
+
+        if gstrand==1: tssdist = tss - ploc
+        else: tssdist = ploc - tss
+
+        columns = [ str(x) for x in
+                    [  contig, pstart, pend, peak_id, peak_score, peak_width, peak_centre, tssdist, gene_id, tss] ]
+        o.write("\t".join( columns  ) + "\n")
+    o.close()
+
+    # get closest genes 2 peaks, 1 gene per peak
+    tmp_dir = "$SCRATCH_DIR"
+    statement = '''tmp=`mktemp -p %(tmp_dir)s`;
+                tail -n +2 %(sql_table)s  | sed 's/-//g' 
+                | awk 'BEGIN {OFS="\\t"} {print $4,$5,$6,$7,$8,$9,$10,$1,$2,$3}' 
+                | sort -k8,8 -k9,9n -k7,7n 
+                | cat | uniq -f7 > $tmp 
+                && awk 'BEGIN {OFS="\\t"} {print $8,$9,$10,$1,$2,$3,$4,$5,$6,$7}' < $tmp 
+                > %(outfile)s  && rm %(sql_table)s $tmp''' % locals()
+    print statement
+
+    
+@transform(regulatedTables, suffix(".bed"), ".load")
+def loadRegulatedTables(infile,outfile):
+    P.load(infile,outfile,
+           options='-H"contig,peak_start,peak_end,peak_id,peak_score,peak_width,peak_centre,TSSdist,gene_id,TSS" -i "peak_id" ')
+
+
+@follows(loadRegulatedTables)
+def great():
+    pass
+
+
+########################################################
+####     Differential Accessibility Read Counts     ####
+########################################################
+@follows(great)
+@transform("bowtie2.dir/*.prep.bam",
+           regex(r"(.*).prep.bam"),
+           r"\1.prep.bam.bai")
+def indexBAM(infile, outfile):
+    '''Index input BAM files'''
+
+    statement = '''samtools index %(infile)s %(outfile)s'''
+
+    P.run()
+
+    
+def generate_scoreIntervalsBAM_jobs():
+    
+    # list of bed files & bam files, from which to create jobs
+    intervals = glob.glob("regulated_genes.dir/*annotated.bed")
+    bams = glob.glob("bowtie2.dir/*.prep.bam")
+
+    outDir = "BAM_counts.dir/"
+
+    for interval in intervals:
+        #print interval
+        ifile = [i.split("/")[-1][:-len(".annotated.bed")] for i in [interval] ]
+        # iterate over intervals generating infiles & partial filenames
+
+        for bam in bams:
+            bfile = [b.split("/")[-1][:-len(".prep.bam")] for b in [bam] ]
+            # for each interval, iterate over bams generating infiles & partial filenames
+            bedfile = ' '.join(str(x) for x in ifile )
+            bamfile = ' '.join(str(x) for x in bfile )
+
+            output = outDir + bedfile + "." + bamfile + "_counts.txt"
+            # output = outfiles. 1 for each bed/bam combination
+
+            yield ( [ [interval, bam], output ] )
+
+            
+@follows(indexBAM)
+@files(generate_scoreIntervalsBAM_jobs)
+def scoreIntervalsBAM(infiles, outfile):
+    '''use bedtools to count reads in bed intervals'''
+
+    interval, bam = infiles
+
+    tmp_dir = "$SCRATCH_DIR"
+    
+    if BamTools.isPaired(bam):
+        statement = '''tmp=`mktemp -p %(tmp_dir)s`;
+                       cut -f1-7,9 %(interval)s > $tmp; checkpoint;
+                       bedtools multicov -p -q 10 -bams %(bam)s -bed $tmp > %(outfile)s; checkpoint;
+                       sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\tpeak_center\\tgene_id\\ttotal' %(outfile)s; checkpoint;
+                       rm $tmp''' % locals()
+        
+    else:
+         statement = '''tmp=`mktemp -p %(tmp_dir)s`;
+                        cut -f1-7,9 %(interval)s > $tmp; checkpoint;
+                        bedtools multicov -q 10 -bams %(bam)s -bed $tmp > %(outfile)s; checkpoint; 
+                        sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\tpeak_center\\tgene_id\\ttotal' %(outfile)s; checkpoint;
+                        rm $tmp''' % locals()
+
+    print statement
+
+    P.run()
+
+    
+@transform(scoreIntervalsBAM, suffix(".txt"), ".load")
+def loadIntervalscoresBAM(infile, outfile):
+    P.load(infile, outfile, options='-i "gene_id"')
+
+    
+def normaliseBAMcountsGenerator():
+
+    total_reads = glob.glob("BAM_counts.dir/*_total_reads.txt")
+    counts = glob.glob("BAM_counts.dir/*counts.txt")
+
+    if len(total_reads)==0:
+        yield []
+        
+    outdir = "BAM_counts.dir/"
+
+    # generate jobs & match total_reads to counts files
+    for interval_count in counts:
+        count_table = interval_count[:-len("_counts.txt") ] 
+
+        for read_count in total_reads:
+            output = count_table + "_norm_counts.txt"
+
+            bam_str = count_table.split(".")[-1]
+            if bam_str in read_count:
+                
+                yield ( [ [interval_count, read_count], output ] )
+
+                
+@follows(loadIntervalscoresBAM)
+@files(normaliseBAMcountsGenerator)
+def normaliseBAMcounts(infiles, outfile):
+    '''normalise BAM counts for file size'''
+    
+#    to_cluster = True
+#    job_memory = "5G"
+    
+    interval_counts, total_reads = infiles
+    
+    # read counts to dictionary
+    name = os.path.basename(total_reads)[:-len(".txt")]
+    total_reads = open(total_reads, "r").read().replace("\n", "")
+    counts = {}
+    counts[name] = total_reads
+    counts_sample = counts[name]
+
+    # norm factor = total reads / 1e+06
+    norm_factor = float(counts_sample) / 1000000
+
+    sample_name = name.rstrip("_total_reads")
+
+    statement = '''tail -n +2 %(interval_counts)s |
+                   awk 'BEGIN {OFS="\\t"} 
+                     {if ($3-$2 > 0) width = $3-$2; else width = 1}
+                     {print $1,$2,$3,$4,$5,$9,
+                       sprintf("%%f", $9/%(norm_factor)s),sprintf("%%f", ($9/%(norm_factor)s)/width),width,"%(sample_name)s"}'
+                     - > %(outfile)s'''
+
+    # add 1 if width == 0 to avoid division by 0
+    # sprintf - decimal format for normalised counts
+    
+    print statement
+
+    P.run()
+
+@transform(normaliseBAMcounts, suffix(".txt"), ".load")
+def loadnormaliseBAMcounts(infile, outfile):
+    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')    
+
+                
+@follows(loadnormaliseBAMcounts)
+@merge("BAM_counts.dir/*_norm_counts.txt", "all_norm_counts.txt")
+def mergeNormCounts(infiles, outfile):
+
+    infiles = ' '.join(infiles)
+    
+    statement = '''cat %(infiles)s >  %(outfile)s'''
+
+    P.run()
+
+@transform(mergeNormCounts, suffix(r".txt"), r".load")
+def loadmergeNormCounts(infile, outfile):
+    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')
+
+@follows(loadmergeNormCounts)
+def count():
+    pass
+
+
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(mapping, peakcalling, coverage)
+@follows(mapping, peakcalling, coverage, frip, count)
 def full():
     pass
 
