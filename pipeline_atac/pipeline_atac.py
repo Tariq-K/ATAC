@@ -106,6 +106,7 @@ import CGAT.BamTools as BamTools
 import CGAT.Database as DB
 import re
 import glob
+import gzip
 
 # load options from the config file
 PARAMS = P.getParameters(
@@ -550,7 +551,7 @@ def picardInsertSizes(infile, outfile):
 
     tmp_dir = "$SCRATCH_DIR"
     
-    job_threads = "8"
+    job_threads = "10"
     job_memory = "10G"
 
     pdf = outfile.replace("Metrics.txt", "Histogram.pdf")
@@ -772,7 +773,7 @@ def indexPrepBam(infile, outfile):
 def bamCoverage(infile, outfile):
     '''Make normalised bigwig tracks with deeptools'''
 
-    job_memory = "2G"
+    job_memory = "4G"
     job_threads = "10"
 
     if BamTools.isPaired(infile):
@@ -1027,7 +1028,7 @@ def mergePeaks(infiles, outfile):
                    awk 'BEGIN {OFS="\\t"} {if ($2 < $3) print $0}' - |
                    sort -k1,1 -k2,2n |
                    mergeBed -c 4,5 -o count,mean -i - |
-                   awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,"merged_peaks_"NR,$5,$4,$3-$2,($2+$3)/2}' - > %(outfile)s; checkpoint;
+                   awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,"merged_peaks_"NR,$5,$4,$3-$2,sprintf("%%i", ($2+$3)/2)}' - > %(outfile)s; checkpoint;
                    rm $tmp'''
 
     print statement
@@ -1133,8 +1134,8 @@ def regulatedGenes(infiles,outfile):
     infile, greatPromoters = infiles
 
     # intersect infiles with great gene annotation beds to get peak associated genes
-    statement = '''intersectBed -wa -wb -a <(cut -f1-7 %(infile)s) -b %(greatPromoters)s 
-                | cut -f1-7,11 > %(outfile)s''' % locals()
+    statement = '''intersectBed -wa -wb -a <(cut -f1-8 %(infile)s) -b %(greatPromoters)s 
+                | cut -f1-8,12 > %(outfile)s''' % locals()
 
     # Filter on nearest peak 2 gene later
 
@@ -1186,12 +1187,15 @@ def regulatedTables(infiles, outfile):
 
     for r in sqlresult:
         contig, pstart, pend, peak_id, peak_score, no_peaks, peak_width, peak_centre = r[0:8]
-        gene_id, gene_name, gene_strand, gene_start, gene_end = r[8:13]
+        gene_id, gene_name, gene_strand, gene_start, gene_end = r[8:14]
         
         if gene_strand == "+": gstrand = 1
         else: gstrand = 2
 
         tss = getTSS(gene_start,gene_end,gene_strand)
+
+        pwidth = max(pstart,pend) - min(pstart,pend)
+        ploc = (pstart + pend)/2
 
         if gstrand==1: tssdist = tss - ploc
         else: tssdist = ploc - tss
@@ -1208,9 +1212,12 @@ def regulatedTables(infiles, outfile):
                 | awk 'BEGIN {OFS="\\t"} {print $4,$5,$6,$7,$8,$9,$10,$1,$2,$3}' 
                 | sort -k8,8 -k9,9n -k7,7n 
                 | cat | uniq -f7 > $tmp 
-                && awk 'BEGIN {OFS="\\t"} {print $8,$9,$10,$1,$2,$3,$4,$5,$6,$7}' < $tmp 
+                && awk 'BEGIN {OFS="\\t"} {print $8,$9,$10,$1,$2,$3,$4,$5,$6,$7}' $tmp 
                 > %(outfile)s  && rm %(sql_table)s $tmp''' % locals()
+
     print statement
+
+    P.run()
 
     
 @transform(regulatedTables, suffix(".bed"), ".load")
