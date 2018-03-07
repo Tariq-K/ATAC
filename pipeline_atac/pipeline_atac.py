@@ -989,8 +989,8 @@ def FRIP(infiles, outfile):
 
     
 @collate(FRIP,
-         regex("FRiP.dir/(.*).txt"),
-         r"FRiP.dir/frip_table.txt")
+         regex("FRIP.dir/(.*).txt"),
+         r"FRIP.dir/frip_table.txt")
 def FRIP_summary(infiles, outfile):
     
     statement = '''cat FRiP.dir/*txt | sed '1i \sample\tFRiP' | tr [[:blank:]] "\\t" > %(outfile)s'''
