@@ -993,7 +993,7 @@ def FRIP(infiles, outfile):
          r"FRIP.dir/frip_table.txt")
 def FRIP_summary(infiles, outfile):
     
-    statement = '''cat FRiP.dir/*txt | sed '1i \sample\tFRiP' | tr [[:blank:]] "\\t" > %(outfile)s'''
+    statement = '''cat FRIP.dir/*txt | sed '1i \sample\tFRiP' | tr [[:blank:]] "\\t" > %(outfile)s'''
     print statement
     P.run()
 
@@ -1352,7 +1352,7 @@ def normaliseBAMcounts(infiles, outfile):
     statement = '''tail -n +2 %(interval_counts)s |
                    awk 'BEGIN {OFS="\\t"} 
                      {if ($3-$2 > 0) width = $3-$2; else width = 1}
-                     {print $1,$2,$3,$4,$5,$9,
+                     {print $1,$2,$3,$4,$5,$8,$9,
                        sprintf("%%f", $9/%(norm_factor)s),sprintf("%%f", ($9/%(norm_factor)s)/width),width,"%(sample_name)s"}'
                      - > %(outfile)s'''
 
@@ -1365,7 +1365,7 @@ def normaliseBAMcounts(infiles, outfile):
 
 @transform(normaliseBAMcounts, suffix(".txt"), ".load")
 def loadnormaliseBAMcounts(infile, outfile):
-    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')    
+    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,gene_id,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')    
 
                 
 @follows(loadnormaliseBAMcounts)
@@ -1380,13 +1380,104 @@ def mergeNormCounts(infiles, outfile):
 
 @transform(mergeNormCounts, suffix(r".txt"), r".load")
 def loadmergeNormCounts(infile, outfile):
-    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')
+    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,gene_id,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')
 
 @follows(loadmergeNormCounts)
 def count():
     pass
 
 
+########################################################
+####                    QC Plots                    ####
+########################################################
+@follows(count)
+@files(None, "regulated_genes.dir/TSS.bed")
+def TSSbed(infile, outfile):
+    '''Get TSSs for all genes'''
+    
+    query = '''select distinct contig, start, end, gene_name, strand
+                  from ensemblGeneset''' 
+
+    # db = PARAMS["database"]
+    
+    # TSS = DB.fetch_DataFrame(query, db)
+
+    # TSS.to_csv(outfile, sep="\t", header=False, index=False)
+
+    
+    dbh = sqlite3.connect(PARAMS["database"])
+    cc = dbh.cursor()
+    sqlresult = cc.execute(query).fetchall()
+
+    o = open(outfile,"w")
+    
+    for r in sqlresult:
+        contig, start, end, gene_id, gene_strand = r[0:5]
+       
+        if gene_strand == "+": gstrand = 1
+        else: gstrand = 2
+
+        tss = getTSS(start,end,gene_strand)
+
+        tss_start = tss -1
+        tss_end = tss +1
+        
+        columns = [ str(x) for x in
+                    [  contig, tss_start, tss_end, gene_id] ]
+        o.write("\t".join( columns  ) + "\n")
+    o.close()
+
+@transform(TSSbed,
+           regex("regulated_genes.dir/TSS.bed"),
+           add_inputs("deeptools.dir/*.coverage.bw"),
+           r"deeptools.dir/TSS.matrix.gz")
+def TSSmatrix(infiles, outfile):
+
+    #bed, bws = infiles
+    bed = infiles[0]
+    bws = [x for x in infiles if ".bw" in x]
+    
+    job_threads = str(len(bws))
+
+    bws = ' '.join(bws)
+    
+    statement = '''computeMatrix reference-point
+                     -S %(bws)s
+                     -R %(bed)s
+                     --missingDataAsZero
+                     -bs 10
+                     -a 2500
+                     -b 2500
+                     -p "max"
+                     -out %(outfile)s'''
+
+    P.run()
+
+    
+@transform(TSSmatrix,
+           suffix(".matrix.gz"),
+           r"\1_profile.png")
+def TSSprofile(infile, outfile):
+    '''Plot profile over TSS'''
+
+    statement = '''plotProfile
+                     -m %(infile)s
+                     --perGroup
+                     --plotTitle "TSS enrichment"
+                     --yAxisLabel "ATAC signal (RPKM)"
+                     -out %(outfile)s'''
+
+    P.run()
+
+    
+@follows(TSSprofile)
+def TSSplot():
+    pass
+
+
+           
+    
+    
 # ---------------------------------------------------
 # Generic pipeline tasks
 @follows(mapping, peakcalling, coverage, frip, count)
