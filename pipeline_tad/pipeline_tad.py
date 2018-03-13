@@ -240,200 +240,229 @@ def loadPeaks(infile, outfile):
     P.load(infile, outfile, options='-H "contig,start,end,peak_id,peak_score" ')
 
 
-########################################################
-####               ChIP Coverage                    ####
-########################################################
-@follows(loadPeaks)
-@transform("data.dir/*.bam",
-           regex(r"(.*).bam"),
-           r"\1.bam.bai")
-def indexBAM(infile, outfile):
-    '''Index input BAM files'''
+# ########################################################
+# ####               ChIP Coverage                    ####
+# ########################################################
+# @follows(loadPeaks)
+# @transform("data.dir/*.bam",
+#            regex(r"(.*).bam"),
+#            r"\1.bam.bai")
+# def indexBAM(infile, outfile):
+#     '''Index input BAM files'''
 
-    statement = '''samtools index %(infile)s %(outfile)s'''
+#     statement = '''samtools index %(infile)s %(outfile)s'''
 
-    P.run()
+#     P.run()
 
     
-def generate_scoreIntervalsBAM_jobs():
+# def generate_scoreIntervalsBAM_jobs():
 
-    # list of bed files & bam files, from which to create jobs
-    intervals = glob.glob("data.dir/insulators.bed")
-    bams = glob.glob("data.dir/*.bam")
+#     # list of bed files & bam files, from which to create jobs
+#     intervals = glob.glob("data.dir/insulators.bed")
+#     bams = glob.glob("data.dir/*.bam")
 
-    outDir = "BAM_counts.dir/"
+#     outDir = "BAM_counts.dir/"
 
-    for interval in intervals:
-        ifile = [i.split("/")[-1][:-len(".bed")] for i in [interval] ]
-        # iterate over intervals generating infiles & partial filenames
+#     for interval in intervals:
+#         ifile = [i.split("/")[-1][:-len(".bed")] for i in [interval] ]
+#         # iterate over intervals generating infiles & partial filenames
 
-        for bam in bams:
-            bfile = [b.split("/")[-1][:-len(".bam")] for b in [bam] ]
-            # for each interval, iterate over bams generating infiles & partial filenames
-            bedfile = ' '.join(str(x) for x in ifile )
-            bamfile = ' '.join(str(x) for x in bfile )
+#         for bam in bams:
+#             bfile = [b.split("/")[-1][:-len(".bam")] for b in [bam] ]
+#             # for each interval, iterate over bams generating infiles & partial filenames
+#             bedfile = ' '.join(str(x) for x in ifile )
+#             bamfile = ' '.join(str(x) for x in bfile )
 
-            output = outDir + bedfile + "." + bamfile + "_counts.txt"
-            # output = outfiles. 1 for each bed/bam combination
+#             output = outDir + bedfile + "." + bamfile + "_counts.txt"
+#             # output = outfiles. 1 for each bed/bam combination
 
-            yield ( [ [interval, bam], output ] )
+#             yield ( [ [interval, bam], output ] )
 
             
-@follows(indexBAM, mkdir("BAM_counts.dir/"))
-@files(generate_scoreIntervalsBAM_jobs)
-def scoreIntervalsBAM(infiles, outfile):
-    '''use bedtools to count reads in bed intervals'''
+# @follows(indexBAM, mkdir("BAM_counts.dir/"))
+# @files(generate_scoreIntervalsBAM_jobs)
+# def scoreIntervalsBAM(infiles, outfile):
+#     '''use bedtools to count reads in bed intervals'''
 
-    interval, bam = infiles
+#     interval, bam = infiles
 
-    tmp_dir = "$SCRATCH_DIR"
+#     tmp_dir = "$SCRATCH_DIR"
 
-    peak_offset = int(PARAMS["meme_window"])/2
+#     peak_offset = int(PARAMS["meme_window"])/2
         
-    if BamTools.isPaired(bam):
-        options = "-p"
+#     if BamTools.isPaired(bam):
+#         options = "-p"
 
-    else:
-        options = " "
-        
-    statement = '''tmp=`mktemp -p %(tmp_dir)s`;checkpoint ;
-                   awk 'BEGIN {OFS="\\t"} 
-                     {pcenter=($2+$3)/2} 
-                     {print $1,sprintf("%%d", pcenter-%(peak_offset)s),sprintf("%%d", pcenter+%(peak_offset)s),$4,$5}' 
-                     %(interval)s > $tmp; checkpoint;
-                   bedtools multicov
-                     %(options)s
-                     -q 10 
-                     -bams %(bam)s 
-                     -bed $tmp
-                     > %(outfile)s 
-                    && sed 
-                     -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\ttotal' 
-                     %(outfile)s''' 
-        
-    print statement
+#     else:
+#         options = " "
 
-    P.run()
+#     # change this! Don't trim peaks to centre +/- 100bp, as not all binding will be captured, instead use full peak width
+#     statement = '''tmp=`mktemp -p %(tmp_dir)s`;checkpoint ;
+#                    awk 'BEGIN {OFS="\\t"} 
+#                      {pcenter=($2+$3)/2} 
+#                      {print $1,sprintf("%%d", pcenter-%(peak_offset)s),sprintf("%%d", pcenter+%(peak_offset)s),$4,$5}' 
+#                      %(interval)s > $tmp; checkpoint;
+#                    bedtools multicov
+#                      %(options)s
+#                      -q 10 
+#                      -bams %(bam)s 
+#                      -bed $tmp
+#                      > %(outfile)s 
+#                     && sed 
+#                      -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\ttotal' 
+#                      %(outfile)s''' 
+        
+#     print statement
+
+#     P.run()
 
     
-@transform(scoreIntervalsBAM, suffix(".txt"), ".load")
-def loadIntervalscoresBAM(infile, outfile):
-    P.load(infile, outfile, options='-i "gene_id"')
+# @transform(scoreIntervalsBAM, suffix(".txt"), ".load")
+# def loadIntervalscoresBAM(infile, outfile):
+#     P.load(infile, outfile, options='-i "gene_id"')
 
     
-def generator_BAMtotalcounts():
-    bams = glob.glob("data.dir/*.bam")
-    outDir = "BAM_counts.dir/"
+# def generator_BAMtotalcounts():
+#     bams = glob.glob("data.dir/*.bam")
+#     outDir = "BAM_counts.dir/"
 
-    for bam in bams: 
-        bfile = [b.split("/")[-1][:-len(".bam")] for b in [bam] ]
-        bfile = ' '.join(str(x) for x in bfile ) # unpack from list
-        output = outDir + bfile + "_total_reads.txt"
+#     for bam in bams: 
+#         bfile = [b.split("/")[-1][:-len(".bam")] for b in [bam] ]
+#         bfile = ' '.join(str(x) for x in bfile ) # unpack from list
+#         output = outDir + bfile + "_total_reads.txt"
         
-        yield ( [ bam, output ] )
+#         yield ( [ bam, output ] )
 
         
-@follows(loadIntervalscoresBAM)
-@files(generator_BAMtotalcounts)
-def BAMtotalcounts(infile, outfile):
-    '''Count total reads in BAM for normalisation'''
+# @follows(loadIntervalscoresBAM)
+# @files(generator_BAMtotalcounts)
+# def BAMtotalcounts(infile, outfile):
+#     '''Count total reads in BAM for normalisation'''
 
-    if BamTools.isPaired(infile):
-        # count only reads mapped in proper pairs
-        statement = '''samtools view -f 2 %(infile)s | wc -l | 
-                         awk 'BEGIN {OFS="\\t"} {print $0/2}' > %(outfile)s'''
+#     if BamTools.isPaired(infile):
+#         # count only reads mapped in proper pairs
+#         statement = '''samtools view -f 2 %(infile)s | wc -l | 
+#                          awk 'BEGIN {OFS="\\t"} {print $0/2}' > %(outfile)s'''
 
-    else:
-        # exclude unmapped reads
-        statement = '''samtools view -F 4 %(infile)s | wc -l  | 
-                         awk 'BEGIN {OFS="\\t"} {print $0}' > %(outfile)s''' 
+#     else:
+#         # exclude unmapped reads
+#         statement = '''samtools view -F 4 %(infile)s | wc -l  | 
+#                          awk 'BEGIN {OFS="\\t"} {print $0}' > %(outfile)s''' 
 
 
-    print statement
+#     print statement
 
-    P.run()
+#     P.run()
 
     
-@transform(BAMtotalcounts, suffix(".txt"), r".load")
-def loadBAMtotalcounts(infile, outfile):
-    P.load(infile, outfile, options='-H "total_reads"')
+# @transform(BAMtotalcounts, suffix(".txt"), r".load")
+# def loadBAMtotalcounts(infile, outfile):
+#     P.load(infile, outfile, options='-H "total_reads"')
 
     
-def normaliseBAMcountsGenerator():
+# def normaliseBAMcountsGenerator():
 
-    total_reads = glob.glob("BAM_counts.dir/*_total_reads.txt")
-    counts = glob.glob("BAM_counts.dir/*counts.txt")
+#     total_reads = glob.glob("BAM_counts.dir/*_total_reads.txt")
+#     counts = glob.glob("BAM_counts.dir/*counts.txt")
 
-    if len(total_reads)==0:
-        yield []
+#     if len(total_reads)==0:
+#         yield []
         
-    outdir = "BAM_counts.dir/"
+#     outdir = "BAM_counts.dir/"
 
-    # generate jobs & match total_reads to counts files
-    for interval_count in counts:
-        count_table = interval_count[:-len("_counts.txt") ] 
+#     # generate jobs & match total_reads to counts files
+#     for interval_count in counts:
+#         count_table = interval_count[:-len("_counts.txt") ] 
 
-        for read_count in total_reads:
-            output = count_table + "_norm_counts.txt"
+#         for read_count in total_reads:
+#             output = count_table + "_norm_counts.txt"
 
-            bam_str = count_table.split(".")[-1]
-            if bam_str in read_count:
+#             bam_str = count_table.split(".")[-1]
+#             if bam_str in read_count:
                 
-                yield ( [ [interval_count, read_count], output ] )
+#                 yield ( [ [interval_count, read_count], output ] )
 
                 
-@follows(loadBAMtotalcounts)
-@files(normaliseBAMcountsGenerator)
-def normaliseBAMcounts(infiles, outfile):
-    '''normalise BAM counts for file size'''
+# @follows(loadBAMtotalcounts)
+# @files(normaliseBAMcountsGenerator)
+# def normaliseBAMcounts(infiles, outfile):
+#     '''normalise BAM counts for file size'''
     
-#    to_cluster = True
-#    job_memory = "5G"
+# #    to_cluster = True
+# #    job_memory = "5G"
     
-    interval_counts, total_reads = infiles
+#     interval_counts, total_reads = infiles
     
-    # read counts to dictionary
-    name = os.path.basename(total_reads)[:-len(".txt")]
-    total_reads = open(total_reads, "r").read().replace("\n", "")
-    counts = {}
-    counts[name] = total_reads
-    counts_sample = counts[name]
+#     # read counts to dictionary
+#     name = os.path.basename(total_reads)[:-len(".txt")]
+#     total_reads = open(total_reads, "r").read().replace("\n", "")
+#     counts = {}
+#     counts[name] = total_reads
+#     counts_sample = counts[name]
 
-    # norm factor = total reads / 1e+06
-    norm_factor = float(counts_sample) / 1000000
+#     # norm factor = total reads / 1e+06
+#     norm_factor = float(counts_sample) / 1000000
 
-    sample_name = name.rstrip("_total_reads")
+#     sample_name = name.rstrip("_total_reads")
 
-    statement = '''tail -n +2 %(interval_counts)s |
-                   awk 'BEGIN {OFS="\\t"} 
-                     {if ($3-$2 > 0) width = $3-$2; else width = 1}
-                     {print $1,$2,$3,$4,$5,$8,
-                       sprintf("%%f", $8/%(norm_factor)s),sprintf("%%f", ($8/%(norm_factor)s)/width),width,"%(sample_name)s"}'
-                     - > %(outfile)s'''
+#     statement = '''tail -n +2 %(interval_counts)s |
+#                    awk 'BEGIN {OFS="\\t"} 
+#                      {if ($3-$2 > 0) width = $3-$2; else width = 1}
+#                      {print $1,$2,$3,$4,$5,$8,
+#                        sprintf("%%f", $8/%(norm_factor)s),sprintf("%%f", ($8/%(norm_factor)s)/width),width,"%(sample_name)s"}'
+#                      - > %(outfile)s'''
 
-    # add 1 if width == 0 to avoid division by 0
-    # sprintf - decimal format for normalised counts
+#     # add 1 if width == 0 to avoid division by 0
+#     # sprintf - decimal format for normalised counts
     
-    print statement
+#     print statement
 
-    P.run()
+#     P.run()
           
     
-@follows(normaliseBAMcounts)
-@merge("BAM_counts.dir/*_norm_counts.txt", "all_norm_counts.txt")
-def mergeNormCounts(infiles, outfile):
+# @follows(normaliseBAMcounts)
+# @merge("BAM_counts.dir/*_norm_counts.txt", "all_norm_counts.txt")
+# def mergeNormCounts(infiles, outfile):
 
-    infiles = ' '.join(infiles)
+#     infiles = ' '.join(infiles)
     
-    statement = '''cat %(infiles)s >  %(outfile)s'''
+#     statement = '''cat %(infiles)s >  %(outfile)s'''
 
-    P.run()
+#     P.run()
 
     
-@transform(mergeNormCounts, suffix(r".txt"), r".load")
-def loadmergeNormCounts(infile, outfile):
-    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')
+# @transform(mergeNormCounts, suffix(r".txt"), r".load")
+# def loadmergeNormCounts(infile, outfile):
+#     P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')
 
+### Don't count reads like this, instead use macs2 treat_pileup & lambda control bedgraphs
+### to generate fold enrichment socres over intervals
+### e.g. 
+# @transform("data.dir/*.bed",
+#            regex(r"data.dir/(.*).bed"),
+#            add_inputs(r"phastcons.bdg"),
+#            r"\1_phastcons.bed")
+# def intervalPhastcons(infiles, outfile):
+#     '''Get mean phastcon scores for bed intervals'''
+
+#     job_threads = "4"
+    
+#     interval, phastcons = infiles
+#     tmp_dir = "$SCRATCH_DIR"
+    
+#     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint ;
+#                    mapBed
+#                      -c 4
+#                      -o mean
+#                      -a <( sort -k1,1 -k2,2n %(interval)s | cut -f1-4)
+#                      -b %(phastcons)s 
+#                      > $tmp; checkpoint ;
+#                    sed 's/\\t\\./\\t0.0/g' $tmp > %(outfile)s; checkpoint ;
+#                    rm $tmp''' 
+
+#     print statement
+
+#     P.run()
 
 ########################################################
 ####               Motif Analysis                   ####

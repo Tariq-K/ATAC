@@ -1309,6 +1309,8 @@ def normaliseBAMcountsGenerator():
     total_reads = glob.glob("BAM_counts.dir/*_total_reads.txt")
     counts = glob.glob("BAM_counts.dir/*counts.txt")
 
+    counts = [x for x in counts if "GREAT" in x] # hack, filter preventing inclusion of counts for FRIP if running pipeline out of sequence
+
     if len(total_reads)==0:
         yield []
         
@@ -1372,8 +1374,10 @@ def loadnormaliseBAMcounts(infile, outfile):
 @merge("BAM_counts.dir/*_norm_counts.txt", "all_norm_counts.txt")
 def mergeNormCounts(infiles, outfile):
 
+    infiles = [x for x in infiles if "GREAT" in x] # hack, filter preventing inclusion of counts for FRIP if running pipeline out of sequence
     infiles = ' '.join(infiles)
-    
+
+    print infiles
     statement = '''cat %(infiles)s >  %(outfile)s'''
 
     P.run()
