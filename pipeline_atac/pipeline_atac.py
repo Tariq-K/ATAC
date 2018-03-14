@@ -156,6 +156,7 @@ def connect():
 
     return dbh
 
+
 def isPaired(files):
     '''Check whether input files are single or paired end
        Note: this is dependent on files having correct suffix'''
@@ -296,11 +297,7 @@ def getTSS(start,end,strand):
 
 Unpaired = isPaired(glob.glob("data.dir/*fastq*gz"))
 
-# if len(PARAMS["bowtie2_unpaired"])==0:
-#        pass
-# else:
-#        Unpaired = PARAMS["bowtie2_unpaired"]
-       
+
 #####################################################
 ####                Mapping                      ####
 #####################################################
@@ -337,6 +334,7 @@ def mapBowtie2_PE(infile, outfile):
                      1> $tmp 
                      2> %(log)s; checkpoint;
                    samtools sort -O BAM -o %(outfile)s $tmp; checkpoint;
+                   samtools index %(outfile)s; checkpoint;
                    rm $tmp''' % locals()
 
     print statement
@@ -372,6 +370,7 @@ def mapBowtie2_SE(infile, outfile):
                      1> $tmp 
                      2> %(log)s; checkpoint;
                    samtools sort -O BAM -o %(outfile)s $tmp; checkpoint;
+                   samtools index %(outfile)s; checkpoint;
                    rm $tmp''' % locals()
 
     print statement
@@ -381,38 +380,28 @@ def mapBowtie2_SE(infile, outfile):
 @follows(mapBowtie2_PE, mapBowtie2_SE)
 @transform("bowtie2.dir/*.genome.bam", suffix(r".genome.bam"), r".filt.bam")
 def filterBam(infile, outfile):
-    '''filter bams on MAPQ >10, & remove reads mapping to chrM before peakcalling.
-       Optionally filter reads based on insert size (max size specified in ini)'''
+    '''filter bams on MAPQ >10, & remove reads mapping to chrM before peakcalling'''
 
     job_memory = "10G"
     job_threads = "2"
 
     local_tmpdir = "$SCRATCH_DIR"
-
-    insert_size_filter_F = PARAMS["bowtie2_insert_size"]
-    insert_size_filter_R = "-" + str(insert_size_filter_F) # reverse reads have "-" prefix for TLEN
-
-    if len(str(insert_size_filter_F))==0:
-        options = ''' '''
-    else:
-        options = '''awk 'BEGIN {OFS="\\t"} {if ($9 ~ /^-/ && $9 > %(insert_size_filter_R)s) print $0;
-                       else if ($9 ~ /^[0-9]/ && $9 < %(insert_size_filter_F)s) print $0}' | ''' % locals()
         
     statement = '''tmp=`mktemp -p %(local_tmpdir)s`; checkpoint ;
                    head=`mktemp -p %(local_tmpdir)s`; checkpoint ;
                    samtools view -h %(infile)s | grep "^@" - > $head ; checkpoint ; 
                    samtools view -q10 %(infile)s | 
                      grep -v "chrM" - | 
-                     %(options)s 
                      cat $head - |
                      samtools view -h -o $tmp - ; checkpoint ;
                    samtools sort -O BAM -o %(outfile)s $tmp ; checkpoint ;
+                   samtools index %(outfile)s; checkpoint;
                    rm $tmp $head''' % locals()
 
     print statement
 
     P.run()
-
+    
 
 @transform(filterBam,
            regex(r"(.*).filt.bam"),
@@ -445,15 +434,52 @@ def removeDuplicates(infile, outfile):
     P.run()
 
     
-@follows(removeDuplicates)
+@active_if(Unpaired == False)
+@transform(removeDuplicates,
+           suffix(r".prep.bam"),
+           r".size_filt.prep.bam")
+def size_filterBam(infile, outfile):
+    '''filter bams on insert size (max size specified in ini)'''
+
+    job_memory = "10G"
+    job_threads = "2"
+
+    local_tmpdir = "$SCRATCH_DIR"
+
+    insert_size_filter_F = PARAMS["bowtie2_insert_size"]
+    insert_size_filter_R = "-" + str(insert_size_filter_F) # reverse reads have "-" prefix for TLEN
+
+    statement = '''tmp=`mktemp -p %(local_tmpdir)s`; checkpoint ;
+                   head=`mktemp -p %(local_tmpdir)s`; checkpoint ;
+                   samtools view -h %(infile)s | grep "^@" - > $head ; checkpoint ; 
+                   samtools view %(infile)s | 
+                     awk 'BEGIN {OFS="\\t"} {if ($9 ~ /^-/ && $9 > %(insert_size_filter_R)s) print $0;
+                       else if ($9 ~ /^[0-9]/ && $9 < %(insert_size_filter_F)s) print $0}' - |     
+                     cat $head - |
+                     samtools view -h -o $tmp - ; checkpoint ;
+                   samtools sort -O BAM -o %(outfile)s $tmp ; checkpoint ;
+                   samtools index %(outfile)s; checkpoint;
+                   rm $tmp $head''' % locals()
+
+
+    print statement
+
+    P.run()
+
+    
+@follows(size_filterBam)
 @transform("bowtie2.dir/*.bam", suffix(r".bam"), r".bam.bai")
 def indexBam(infile, outfile):
-    '''index bams'''
+    '''index bams, if index failed to be generated'''
 
     statement = '''samtools index -b %(infile)s > %(outfile)s'''
 
     P.run()
 
+    
+####################################################
+#####               Mapping QC                 #####
+####################################################
 @follows(indexBam)
 @transform("bowtie2.dir/*.genome.bam",
            regex(r"(.*).genome.bam"),
@@ -473,9 +499,6 @@ def contigReadCounts(infile, outfile):
 
     P.run()
 
-# @transform(contigReadCounts, suffix(r".counts"), r".load")
-# def loadcontigReadCounts(infile, outfile):
-#     P.load(infile, outfile, options='-H "contig,length,mapped_reads,unmapped_reads,sample_id" ')
 
 @follows(contigReadCounts)
 @merge("bowtie2.dir/*.contigs.counts", "allContig.counts")
@@ -516,8 +539,6 @@ def picardAlignmentSummary(infile, outfile):
 
     job_threads = "4"
     job_memory = "5G"
-
-#    outfile = "bowtie2.dir/" + '_'.join(os.path.basename(outfile).split(".")[0:2]) + ".picardAlignmentStats.txt"
     
     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint ;
                    CollectAlignmentSummaryMetrics
@@ -542,6 +563,7 @@ def loadpicardAlignmentSummary(infiles, outfile):
                          options='-i "sample_id"')
 
 
+@active_if(Unpaired == False)
 @follows(flagstatBam)
 @transform("bowtie2.dir/*.bam",
            regex(r"(\S+)\.(.*).bam"),
@@ -571,6 +593,7 @@ def picardInsertSizes(infile, outfile):
 
     P.run()
 
+    
 @merge(picardInsertSizes,
        "picardInsertSizeMetrics.load")
 def loadpicardInsertSizeMetrics(infiles, outfile):
@@ -653,7 +676,7 @@ def loadgetFragmentSize(infile, outfile):
 
 
 @follows(loadgetFragmentSize)
-@transform(removeDuplicates,
+@transform("bowtie2.dir/*.prep.bam",
            regex("bowtie2.dir/(.*).prep.bam"),
            r"macs2.dir/\1.macs2.log")
 def macs2callpeaks(infile, outfile):
@@ -1017,13 +1040,21 @@ def frip():
 def mergePeaks(infiles, outfile):
     '''cat all peak files, center over peak summit +/- 250 b.p., then merge peaks'''
 
-    infiles = ' '.join(infiles)
     tmp_dir = "$SCRATCH_DIR"
-#    window_size = PARAMS[]
+    window_size = PARAMS["read_counts_window_size"]
+    offset = int(window_size)/2
+
+    # defualt is to use non size filtered peaks
+    if PARAMS["read_counts_peaks"] == "all":
+        infiles = [x for x in infiles if "size_filt" not in x]
+    if PARAMS["read_counts_peaks"] == "size_filt":
+        infiles = [x for x in infiles if "size_filt" in x]
+        
+    infiles = ' '.join(infiles)
     
     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
                    cat %(infiles)s | grep -v ^chrUn* -  > $tmp; checkpoint;
-                   awk 'BEGIN {OFS="\\t"} {center = $2 + $10 ; start = center - 250 ; end = center + 250 ;
+                   awk 'BEGIN {OFS="\\t"} {center = $2 + $10 ; start = center - %(offset)s ; end = center + %(offset)s ;
                      print $1,start,end,$4,$5}' $tmp | 
                    awk 'BEGIN {OFS="\\t"} {if ($2 < $3) print $0}' - |
                    sort -k1,1 -k2,2n |
