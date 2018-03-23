@@ -467,7 +467,7 @@ def size_filterBam(infile, outfile):
     P.run()
 
     
-@follows(size_filterBam)
+xb@follows(size_filterBam)
 @transform("bowtie2.dir/*.bam", suffix(r".bam"), r".bam.bai")
 def indexBam(infile, outfile):
     '''index bams, if index failed to be generated'''
