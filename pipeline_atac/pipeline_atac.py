@@ -107,6 +107,7 @@ import CGAT.Database as DB
 import re
 import glob
 import gzip
+import pandas as pd
 
 # load options from the config file
 PARAMS = P.getParameters(
@@ -527,7 +528,53 @@ def flagstatBam(infile, outfile):
     P.run()
 
 
-@follows(flagstatBam)
+@merge(flagstatBam, "bowtie2.dir/flagstats.load")
+def loadflagstatBam(infiles, outfile):
+    '''Summarize & load samtools flagstats'''
+    
+    n = 0
+    
+    for infile in infiles:
+
+        n = n + 1
+        
+        QC_passed = []
+        QC_failed = []
+        cat = ['total', 'secondary', 'supplementary', 'duplicates', 'mapped', 'paired_in_sequencing', 'read1', 'read2',
+                'properly_paired', 'itself_and_mate_mapped', 'singletons', 'mate_mapped_2_diff_chr', 'mate_mapped_2_diff_chr_and_MAPQ_5+']
+
+        name = '_'.join(os.path.basename(infile).split(".")[0:2])
+
+        with open(infile, "r") as o:
+            for line in o:
+                QC_passed.append(line.split(" ")[0])
+                QC_failed.append(line.split(" ")[2])
+
+        QCpass = dict(zip(cat, QC_passed))
+        QCfail = dict(zip(cat, QC_failed))
+
+        pass_df = pd.DataFrame.from_dict(QCpass, orient="index").transpose()
+        pass_df["QC_status"] = "pass"
+
+        fail_df = pd.DataFrame.from_dict(QCfail, orient="index").transpose()
+        fail_df["QC_status"] = "fail"
+
+        if n == 1:
+            table = pass_df.append(fail_df)
+            table["sample_id"] = name
+            
+        else:
+            df = pass_df.append(fail_df)
+            df["sample_id"] = name
+            table = table.append(df)
+
+    table_txt = outfile.replace(".load", ".txt")
+    table.to_csv(table_txt, sep="\t", header=True, index=False)
+
+    P.load(table_txt, outfile)
+            
+
+@follows(loadflagstatBam)
 @transform("bowtie2.dir/*.bam",
            regex(r"(\S+)\.(.*).bam"),
            r"\1_\2.picardAlignmentStats.txt")
@@ -1032,8 +1079,8 @@ def FRIP(infiles, outfile):
     FRIP = str(FRIP)
 
     table_name = P.snip(name, "_total_reads")
-    o = open(outfile, "w")
-    columns = [str(x) for x in [table_name, FRIP]]
+    o = open(outfile, "w")(
+        columns = [str(x) for x in [table_name, FRIP]])
     o.write("\t".join ( columns ) + "\n")
     o.close()
 
