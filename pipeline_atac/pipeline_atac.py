@@ -108,6 +108,7 @@ import re
 import glob
 import gzip
 import pandas as pd
+import numpy as np
 
 # load options from the config file
 PARAMS = P.getParameters(
@@ -533,7 +534,7 @@ def loadflagstatBam(infiles, outfile):
     '''Summarize & load samtools flagstats'''
     
     n = 0
-    
+
     for infile in infiles:
 
         n = n + 1
@@ -621,7 +622,7 @@ def picardInsertSizes(infile, outfile):
     tmp_dir = "$SCRATCH_DIR"
     
     job_threads = "10"
-    job_memory = "10G"
+    job_memory = "40G"
 
     pdf = outfile.replace("Metrics.txt", "Histogram.pdf")
     histogram = outfile.replace("Metrics.txt", "Histogram.txt")
@@ -927,7 +928,7 @@ def generate_FRIPcountBAM_jobs():
     all_intervals = glob.glob("macs2.dir/*_peaks.narrowPeak")
     all_bams = glob.glob("bowtie2.dir/*.prep.bam")
         
-    outDir = "BAM_counts.dir/"
+    outDir = "FRIP.dir/"
 
     # group size filtered and non-size filtered files seperately
     bams = [x for x in all_bams if "size_filt" in x]
@@ -967,8 +968,8 @@ def generate_FRIPcountBAM_jobs():
                     if a == b and b == c: #sanity check
                         yield ( [ [interval, bam], output ] )
 
-    
-@follows(mkdir("BAM_counts.dir"), coverage)
+                        
+@follows(mkdir("FRIP.dir"), coverage)
 @files(generate_FRIPcountBAM_jobs)
 def FRIPcountBAM(infiles, outfile):
     '''use bedtools to count reads in bed intervals'''
@@ -996,109 +997,67 @@ def FRIPcountBAM(infiles, outfile):
          
     P.run()
 
-                 
-@transform(FRIPcountBAM, suffix(".txt"), ".load")
-def loadFRIPcountBAM(infile, outfile):
-    P.load(infile, outfile, options='-i "peak_id"')
-
     
-def generator_BAMtotalcounts():
-
-    bams = glob.glob("bowtie2.dir/*prep.bam")
-
-    outDir = "BAM_counts.dir"
-
-    for bam in bams:
-        bfile = bam.split("/")[-1][:-len(".prep.bam")]
-        bfile = ''.join(bfile)
-        output = outDir + "/" + bfile + "_total_reads.txt"
-        
-        yield ( [ bam, output ] )
-
-        
-@follows(loadFRIPcountBAM)
-@files(generator_BAMtotalcounts)
-def BAMtotalcounts(infile, outfile):
-    '''Count total reads in BAM for normalisation'''
-
-    if BamTools.isPaired(infile):
-        statement = '''samtools view -f 2 %(infile)s | wc -l | awk 'BEGIN {OFS="\\t"} {print $0/2}' > %(outfile)s''' % locals()
-        # count only reads mapped in proper pairs
-
-    else:
-        statement = '''samtools view -F 4 %(infile)s | wc -l  | awk 'BEGIN {OFS="\\t"} {print $0}' > %(outfile)s''' % locals()
-        # exclude unmapped reads
-
-    print statement
-
-    P.run()
-
-
-@follows(mkdir("FRIP.dir/"), BAMtotalcounts)
-@transform(FRIPcountBAM,
-           regex(r"BAM_counts.dir/(.*)_fripcounts.txt"),
-           add_inputs(r"BAM_counts.dir/\1_total_reads.txt"),
-           r"FRIP.dir/\1_frip.txt")
+@merge(FRIPcountBAM, "FRIP.dir/frip_table.txt")
 def FRIP(infiles, outfile):
     '''Calculate fraction of read in peaks'''
 
-    bam_counts, total_reads = infiles
+    for infile in infiles:
+        frip_tsv = infile.replace("_fripcounts.txt", "_frip.txt")
 
-    db_name = os.path.basename(bam_counts)
-    db_name = db_name.replace("-", "_")
-    db_name = db_name.replace(".", "_")
-    db_name = db_name[:-len(".txt")]
-                      
-    name = os.path.basename(total_reads)
-    name = name[:-len(".txt")]
-    
-    # read counts to dictionary
-    total_reads = open(total_reads, "r").read().replace("\n", "")
-    counts = {}
-    counts[name] = total_reads
-    counts_int = counts[name]
-    
-    dbhandle = sqlite3.connect(PARAMS["general_database"])
-    cc = dbhandle.cursor()
-    db = PARAMS["general_database"]
-    attach_statement = '''attach %(db)s as db''' % locals()
-    cc.execute(attach_statement)
-    query =  '''select sum(total) from %(db_name)s''' % locals()
-    sql_result = cc.execute(query).fetchall()
-    cc.close()
+        counts = pd.read_csv(infile, sep="\t", header=0)
+        peak_counts = float(np.sum(counts["total"]))
 
-    # sql_result contains a list of 1 tuple (with 1 value),
-    # iterate over list and slice tuple
-    for x in sql_result:
-        result = x[0]
-    
-    # convert bam counts to int
-    counts_int = float(counts_int)
-    
-    FRIP = (result/counts_int)
-    FRIP = str(FRIP)
+        if "size_filt" in infile:
+            name = os.path.basename(infile).replace("_fripcounts.txt", "").replace(".", "_")
+        else:
+            name = os.path.basename(infile).replace("_fripcounts.txt", "_prep")
 
-    table_name = P.snip(name, "_total_reads")
-    o = open(outfile, "w")(
-        columns = [str(x) for x in [table_name, FRIP]])
-    o.write("\t".join ( columns ) + "\n")
-    o.close()
+        db = PARAMS["general_database"]
 
+        if Unpaired == False:
+            query = '''select properly_paired/2 as total from flagstats where QC_status = "pass" and sample_id = "%(name)s" ''' % locals()
+
+        else:
+            query = '''select mapped as total from flagstats where QC_status = "pass" and sample_id = "%(name)s" ''' % locals()
+
+        total_counts = DB.fetch_DataFrame(query, db)
+        total_counts = total_counts["total"]
+
+        FRIP = peak_counts/total_counts
+
+        table_name = name.rstrip("_prep")
+        dict_FRIP = {table_name:FRIP}
+        df = pd.DataFrame.from_dict(dict_FRIP, orient = "index")
+
+        # format df
+        df["sample_id"] = df.index.values
+        df.columns = ["FRIP", "sample_id"]
+        df["size_filt"] = df.apply(lambda x: "<150bp" if "size_filt" in x.sample_id else "all_fragments", axis=1)
+        df["sample_id"] = df["sample_id"].apply(lambda x: x.strip("_size_filt"))
+
+        df.to_csv(frip_tsv, sep="\t", header=True, index=False)
+
+    # merge all files to load to csvdb
+    files = glob.glob("FRIP.dir/*_frip.txt")
+    head = files[0]
+    if len(files)==0:
+        pass
+    files = ' '.join(files)
+
+    tmp_dir = "$SCRATCH_DIR"
     
-@collate(FRIP,
-         regex("FRIP.dir/(.*).txt"),
-         r"FRIP.dir/frip_table.txt")
-def FRIP_summary(infiles, outfile):
-    
-    statement = '''cat FRIP.dir/*txt | sed '1i \sample\tFRiP' | tr [[:blank:]] "\\t" > %(outfile)s'''
-    print statement
+    statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+                   head -n1 %(head)s > $tmp; checkpoint;
+                   for i in %(files)s; do tail -n +2 $i >> $tmp; done; checkpoint;
+                   mv $tmp %(outfile)s'''
+
     P.run()
 
-    
-@transform(FRIP_summary,
-           suffix(".txt"), ".load")
+
+@transform(FRIP, suffix(".txt"), ".load")
 def loadFRIP(infile, outfile):
-    P.load(infile, outfile, options = '-i "sample"')
+    P.load(infile, outfile, options = '-i "sample_id"')
 
 
 @follows(loadFRIP)
@@ -1109,7 +1068,7 @@ def frip():
 ########################################################
 ####                  Merge Peaks                   ####
 ########################################################
-@follows(frip)
+@follows(mkdir("BAM_counts.dir"), frip)
 @merge("macs2.dir/*_peaks.filt.bed", "BAM_counts.dir/merged_peaks.bed")
 def mergePeaks(infiles, outfile):
     '''cat all peak files, center over peak summit +/- 250 b.p., then merge peaks'''
@@ -1404,92 +1363,59 @@ def scoreIntervalsBAM(infiles, outfile):
     P.run()
 
     
-@transform(scoreIntervalsBAM, suffix(".txt"), ".load")
-def loadIntervalscoresBAM(infile, outfile):
-    P.load(infile, outfile, options='-i "gene_id"')
-
-    
-def normaliseBAMcountsGenerator():
-
-    total_reads = glob.glob("BAM_counts.dir/*_total_reads.txt")
-    counts = glob.glob("BAM_counts.dir/*counts.txt")
-
-    counts = [x for x in counts if "GREAT" in x] # hack, filter preventing inclusion of counts for FRIP if running pipeline out of sequence
-
-    if len(total_reads)==0:
-        yield []
-        
-    outdir = "BAM_counts.dir/"
-
-    # generate jobs & match total_reads to counts files
-    for interval_count in counts:
-        count_table = interval_count[:-len("_counts.txt") ] 
-
-        for read_count in total_reads:
-            output = count_table + "_norm_counts.txt"
-
-            bam_str = count_table.split(".")[-1]
-            if bam_str in read_count:
-                
-                yield ( [ [interval_count, read_count], output ] )
-
-                
-@follows(loadIntervalscoresBAM)
-@files(normaliseBAMcountsGenerator)
-def normaliseBAMcounts(infiles, outfile):
+@transform(scoreIntervalsBAM,
+           regex(r"(.*).counts.txt"),
+           r"\1_norm_counts.txt")
+def normaliseBAMcounts(infile, outfile):
     '''normalise BAM counts for file size'''
+       
+    counts = pd.read_csv(infile, sep="\t", header=0)
+
+    if "size_filt" in infile:
+        name = os.path.basename(infile).replace("_counts.txt", "").replace(".", "_").lstrip("merged_peaks_GREAT_")
+    else:
+        name = os.path.basename(infile).rstrip(".counts.txt").split(".")[-1] + "prep"
+        
+    db = PARAMS["general_database"]
+
+    if Unpaired == False:
+        query = '''select properly_paired/2 as total from flagstats where QC_status = "pass" and sample_id = "%(name)s" ''' % locals()
+    else:
+        query = '''select mapped as total from flagstats where QC_status = "pass" and sample_id = "%(name)s" ''' % locals()
+
+    total_counts = DB.fetch_DataFrame(query, db)
+
+    norm_factor = float(total_counts["total"])/1000000 # total_counts/1x10^6
+
+    counts["RPM"] = counts["total"].apply(lambda x: x/norm_factor)
+    counts["RPM_width_norm"] = counts.apply(lambda x: x.RPM/x.peak_width if x.peak_width > 0 else x.RPM/1, axis=1)
+    counts["sample_id"] = name.rstrip("_prep")
+    counts["size_filt"] = counts.apply(lambda x: "<150bp" if "size_filt" in x.sample_id else "all_fragments", axis=1)
+    counts["sample_id"] = counts["sample_id"].apply(lambda x: x.strip("_size_filt"))
     
-#    to_cluster = True
-#    job_memory = "5G"
-    
-    interval_counts, total_reads = infiles
-    
-    # read counts to dictionary
-    name = os.path.basename(total_reads)[:-len(".txt")]
-    total_reads = open(total_reads, "r").read().replace("\n", "")
-    counts = {}
-    counts[name] = total_reads
-    counts_sample = counts[name]
-
-    # norm factor = total reads / 1e+06
-    norm_factor = float(counts_sample) / 1000000
-
-    sample_name = name.rstrip("_total_reads")
-
-    statement = '''tail -n +2 %(interval_counts)s |
-                   awk 'BEGIN {OFS="\\t"} 
-                     {if ($3-$2 > 0) width = $3-$2; else width = 1}
-                     {print $1,$2,$3,$4,$5,$8,$9,
-                       sprintf("%%f", $9/%(norm_factor)s),sprintf("%%f", ($9/%(norm_factor)s)/width),width,"%(sample_name)s"}'
-                     - > %(outfile)s'''
-
-    # add 1 if width == 0 to avoid division by 0
-    # sprintf - decimal format for normalised counts
-    
-    print statement
-
-    P.run()
-
-@transform(normaliseBAMcounts, suffix(".txt"), ".load")
-def loadnormaliseBAMcounts(infile, outfile):
-    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,gene_id,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')    
+    counts.to_csv(outfile, sep="\t", header=True, index=False)
 
                 
-@follows(loadnormaliseBAMcounts)
+@follows(normaliseBAMcounts)
 @merge("BAM_counts.dir/*_norm_counts.txt", "all_norm_counts.txt")
 def mergeNormCounts(infiles, outfile):
 
     infiles = [x for x in infiles if "GREAT" in x] # hack, filter preventing inclusion of counts for FRIP if running pipeline out of sequence
+    head = infiles[0]
     infiles = ' '.join(infiles)
 
-    print infiles
-    statement = '''cat %(infiles)s >  %(outfile)s'''
-
+    tmp_dir = "$SCRATCH_DIR"
+    statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+                   head -n 1 %(head)s >  $tmp; checkpoint;
+                   for i in %(infiles)s; do tail -n +2 $i >> $tmp; done; checkpoint;
+                   mv $tmp %(outfile)s'''
+    
     P.run()
+    
 
 @transform(mergeNormCounts, suffix(r".txt"), r".load")
 def loadmergeNormCounts(infile, outfile):
-    P.load(infile, outfile, options='-H "chromosome,start,end,peak_id,peak_score,gene_id,raw_counts,RPM,RPM_width_norm,peak_width,sample_id" ')
+    P.load(infile, outfile, options='-i "peak_id" ')
 
 @follows(loadmergeNormCounts)
 def count():
@@ -1582,10 +1508,7 @@ def TSSprofile(infile, outfile):
     
 @follows(TSSprofile)
 def TSSplot():
-    pass
-
-
-           
+    pass        
     
     
 # ---------------------------------------------------
