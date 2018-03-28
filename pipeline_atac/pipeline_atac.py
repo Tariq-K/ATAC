@@ -109,6 +109,9 @@ import glob
 import gzip
 import pandas as pd
 import numpy as np
+from pybedtools import BedTool
+import seaborn as sns
+from matplotlib import pyplot as plt
 
 # load options from the config file
 PARAMS = P.getParameters(
@@ -820,36 +823,161 @@ def filterPeaks(infiles, outfile):
     
     P.run()
 
+
+def mergeReplicatePeaksGenerator():
+    '''Get replicate info from pipeline.ini & create jobs'''
     
+    replicates = PARAMS["replicates_pairs"]    
+
+    if len(replicates)==0:
+        pass
+
+    outDir = "macs2.dir/"
+    
+    # if PARAMS["macs2_peaks"]=="all":
+    #     suffix = "_peaks.filt.bed"
+    
+    # if PARAMS["macs2_peaks"]=="size_filt":
+    #     suffix = ".size_filt_peaks.filt.bed"
+
+    peaksets = [".all", ".size_filt"]
+
+    for peaks in peaksets:
+        if peaks == ".all":
+            suffix = "_peaks.filt.bed"
+        if peaks == ".size_filt":
+            suffix = ".size_filt_peaks.filt.bed"
+        
+        for reps in replicates.split('\n'):
+            reps = reps.split(",")
+            out = outDir + reps[2] + "_merged" + peaks + ".bed"
+            bed1 = outDir + reps[0] + suffix
+            bed2 = outDir + reps[1] + suffix
+
+            yield [ [bed1, bed2], out]
+
+        
 @follows(filterPeaks)
+@active_if(PARAMS["replicates_merge_reps"])
+@files(mergeReplicatePeaksGenerator)
+def mergeReplicatePeaks(infiles, outfile):
+    '''Merge replicate peaks'''
+
+    pair1, pair2 = infiles
+
+    beda = BedTool(pair1)
+    bedb = BedTool(pair2)
+
+    tmp = outfile.replace(".bed", ".tmp")
+    
+    ab_bed = beda.intersect(bedb, wa=True, wb=True)
+    ab_bed.saveas(tmp)
+
+    with open(outfile, "w") as output:
+        n = 0
+        with open(tmp, "r") as o:
+            for line in o:
+                n = n + 1
+                fields = [x.strip('"\n') for x in line.split("\t")]
+
+                # destructure list, assign items to variables
+                [chr1, start1, end1, peak_id1, peak_width1, strand1, fold_change1, pvalue1, qvalue1, summit1, 
+                chr2, start2, end2, peak_id2, peak_width2, strand2, fold_change2, pvalue2, qvalue2, summit2] = fields
+
+                # merge columns between reps as appropriate
+                start = min(start1, end1, start2, end2)
+                end = max(start1, end1, start2, end2)
+                peak_width = str(int(end) - int(start))
+                peak_id = '.'.join([peak_id1, peak_id2])
+
+        #         strand = [strand1 if strand1 == strand2 else "."]
+        #         strand = sum(strand, [])
+                if strand1 == strand2:
+                    strand = strand1
+                else:
+                    strand = "."
+
+                fold_change = str(np.mean([float(fold_change1), float(fold_change2)]))
+                pvalue = min(pvalue1, pvalue2)
+                qvalue = min(qvalue1, qvalue2)
+                peak_center = str(int(start) + (int(peak_width)/2))
+
+                # output
+                bed = [chr1, start, end, peak_id, peak_width, strand, fold_change, pvalue, qvalue, peak_center]
+                bed = '\t'.join(bed) + '\n'
+
+                if n == 1:
+                    output.write('\t'.join(["contig", "start", "end", "peak_id", "peak_width", "strand", "fold_change", 
+                                            "pvalue", "qvalue", "summit"]) + '\n')
+                    output.write(bed)
+                else:
+                    output.write(bed)
+
+    statement = '''rm %(tmp)s'''
+
+    P.run()
+
+
 @files(None, "macs2.dir/no_peaks.txt")
 def countPeaks(infiles, outfile):
-    
-    beds = glob.glob("/gfs/work/tkhoyratty/AirPouch_ATAC/analysis/atac_pipeline_trim/macs2.dir/*filt.bed")
 
-    # print beds
-    n = 0
+    beds = glob.glob("/gfs/work/tkhoyratty/AirPouch_ATAC/analysis/atac_pipeline_trim/macs2.dir/*filt.bed")
+    merge_beds = glob.glob("/gfs/work/tkhoyratty/AirPouch_ATAC/analysis/atac_pipeline_trim/macs2.dir/*merged*.bed")
+
+    peaksets = [beds, merge_beds]
+
+    if len(peaksets)==0:
+        pass
+    
     no_peaks = {}
 
-    for bed in beds:
-        n = n + 1
-        name = os.path.basename(bed).replace("_peaks.filt.bed", "")
-        df = pd.read_csv(bed, sep="\t", header=None)
+    for peaks in peaksets:
+        for bed in peaks:
+            if "merged" in bed:
+                name = '.'.join(os.path.basename(bed).split(".")[0:2]).rstrip(".all")
+            else:
+                name = os.path.basename(bed).replace("_peaks.filt.bed", "")
 
-        if n==1:
-            no_peaks = {name : len(df)}
-        else:
+            df = pd.read_csv(bed, sep="\t", header=None)
+
             no_peaks[name] = len(df)
 
     peaks = pd.DataFrame.from_dict(no_peaks, orient="index")
 
     peaks["sample_id"] = peaks.index.values
     peaks["size_filt"] = peaks["sample_id"].apply(lambda x: "all_fragments" if "size_filt" not in x else "<150bp")
-    peaks["sample_id"] = peaks["sample_id"].apply(lambda x: x.split(".")[0])
+    peaks["merged"] = peaks.apply(lambda x: "merged" if "merged" in x.sample_id else "replicate", axis=1)
+    peaks["sample_id"] = peaks["sample_id"].apply(lambda x: x.split(".")[0].rstrip("_merged"))
     peaks = peaks.rename(columns={0:"no_peaks"})
     peaks.reset_index(inplace=True, drop=True)
 
     peaks.to_csv(outfile, header=True, index=False, sep="\t")
+
+#     beds = glob.glob("/gfs/work/tkhoyratty/AirPouch_ATAC/analysis/atac_pipeline_trim/macs2.dir/*filt.bed")
+
+#     # print beds
+#     n = 0
+#     no_peaks = {}
+
+#     for bed in beds:
+#         n = n + 1
+#         name = os.path.basename(bed).replace("_peaks.filt.bed", "")
+#         df = pd.read_csv(bed, sep="\t", header=None)
+
+#         if n==1:
+#             no_peaks = {name : len(df)}
+#         else:
+#             no_peaks[name] = len(df)
+
+#     peaks = pd.DataFrame.from_dict(no_peaks, orient="index")
+
+#     peaks["sample_id"] = peaks.index.values
+#     peaks["size_filt"] = peaks["sample_id"].apply(lambda x: "all_fragments" if "size_filt" not in x else "<150bp")
+#     peaks["sample_id"] = peaks["sample_id"].apply(lambda x: x.split(".")[0])
+#     peaks = peaks.rename(columns={0:"no_peaks"})
+#     peaks.reset_index(inplace=True, drop=True)
+
+#     peaks.to_csv(outfile, header=True, index=False, sep="\t")
 
     
 @transform(countPeaks, suffix(".txt"), ".load")
@@ -1020,9 +1148,9 @@ def mergePeaks(infiles, outfile):
     offset = int(window_size)/2
 
     # defualt is to use non size filtered peaks
-    if PARAMS["read_counts_peaks"] == "all":
+    if PARAMS["macs2_peaks"] == "all":
         infiles = [x for x in infiles if "size_filt" not in x]
-    if PARAMS["read_counts_peaks"] == "size_filt":
+    if PARAMS["macs2_peaks"] == "size_filt":
         infiles = [x for x in infiles if "size_filt" in x]
 
     infiles = ' '.join(infiles)
@@ -1460,7 +1588,197 @@ def coverage():
 ########################################################
 ####                    QC Plots                    ####
 ########################################################
-@follows(coverage)
+@follows(coverage, mkdir("QC_plots"))
+@files(None, "sample_info.txt")
+def getSampleInfo(infile, outfile):
+    '''Generate lookup table of sample info base on pipeline.ini'''
+    
+    sample_info = PARAMS["sample_info"]
+
+    n = 0
+    for line in sample_info.split('\n'):
+        n = n + 1
+        fields = [x.strip(' ') for x in line.split(',')]
+
+        if n ==1:
+            df = pd.DataFrame(fields).transpose()
+            df.columns = ["sample_id", "condition", "replicate"]
+        else:
+            df1 =  pd.DataFrame(fields).transpose()
+            df1.columns = ["sample_id", "condition", "replicate"]
+            df = df.append(df1)
+
+    df["category"] = df.apply(lambda x: str('_'.join([x.condition, x.replicate])), axis=1)
+    
+    df.to_csv(outfile, sep="\t", header=True, index=False)
+
+    
+@transform(getSampleInfo, suffix(".txt"), ".load")
+def loadgetSampleInfo(infile, outfile):
+    P.load(infile, outfile, options='-i "sample_id" ')
+
+
+@follows(loadgetSampleInfo)
+@files(None, ["QC_plots/mapped_pairs.png",
+              "QC_plots/pct_aligned_in_pairs.png",
+              "QC_plots/pct_adapter.png",
+              "QC_plots/pct_chrM.png",
+              "QC_plots/mapping_QC_stats.txt"])
+def mappingPlots(infile, outfiles):
+    '''Collect all mapping stats & retrun df for plotting'''
+
+    db=PARAMS["database"]
+    sample_info = DB.fetch_DataFrame('''select * from sample_info''', db)
+    
+    if Unpaired==False:
+        reads = DB.fetch_DataFrame('''select READS_ALIGNED_IN_PAIRS/2 as MAPPED_PAIRS, PCT_READS_ALIGNED_IN_PAIRS,
+                                         TOTAL_READS, PCT_ADAPTER, sample_id from picardAlignmentSummary
+                                         where CATEGORY = "PAIR" ''', db)
+    if Unpaired==True:
+        print "Update function for non-paired data"
+
+    # Format mapping qc df
+    reads["Filter"] = reads["sample_id"].apply(lambda x: x.split(".")[-1])
+    reads["Filter"] = reads["sample_id"].apply(lambda x: x.split("_")[-1] if "size_filt_prep" not in x else "prep<150bp")
+    reads["sample_id"] = reads["sample_id"].apply(lambda x: '_'.join(x.split("_")[0:-1]))
+    reads["sample_id"] = reads["sample_id"].apply(lambda x: x.split(".")[0])
+
+    if len(sample_info)==0:
+        print "Provide sample_info df with sample annotations"
+
+    reads = pd.merge(reads, sample_info, on="sample_id", how="inner")
+
+    # get no. reads mapping to chrM
+    chrm = DB.fetch_DataFrame('''select * from allContig''', db)
+
+    # reformat df
+    chrm = chrm.pivot("sample_id", "contig", "mapped_reads")
+    chrm["total_mapped_reads"] = chrm.sum(axis=1)
+    chrm["sample_id"] = chrm.index.values
+    chrm.index.name = None
+    chrm = chrm[["chrM", "total_mapped_reads", "sample_id"]]
+    chrm["pct_chrM"] = chrm["chrM"] / chrm["total_mapped_reads"] *100 # % reads mapping to chrM
+
+    # annotate df
+    chrm["sample_id"] = chrm["sample_id"].apply(lambda x: str(x).split(".")[0])
+    chrm = pd.merge(chrm, sample_info, on="sample_id", how="inner")
+    chrm["Filter"] = "genome" # chrM only in genomic reads as filtered out after, others not tested
+
+    mapping_qc = pd.merge(reads, chrm[["pct_chrM", "sample_id", "Filter"]], how="outer", on=["sample_id", "Filter"])
+    mapping_qc.to_csv(outfiles[4], sep="\t", header=True, index=False)
+    
+    sns.set(style="whitegrid", palette="muted") # set seaborn theme
+
+    # make plots
+    sns_total_reads = sns.factorplot(data=mapping_qc, y="MAPPED_PAIRS", x="category", hue="Filter", kind="bar", size=4, aspect=2)
+    sns_total_reads.savefig(outfiles[0])
+    
+    sns_mapped_pairs = sns.factorplot(data=mapping_qc, y="PCT_READS_ALIGNED_IN_PAIRS", x="category", hue="Filter", kind="bar", size=4, aspect=2)
+    sns_mapped_pairs.savefig(outfiles[1])
+    
+    sns_adaptor = sns.factorplot(data=mapping_qc, y="PCT_ADAPTER", x="category", hue="Filter", kind="bar", size=4, aspect=2)
+    sns_adaptor.savefig(outfiles[2])
+    
+    sns_chrm = sns.factorplot(data=mapping_qc, y="pct_chrM", x="category", hue="Filter", kind="bar", size=4, aspect=2)
+    sns_chrm.savefig(outfiles[3])
+
+
+# @follows(mappingPlots)
+# @transform("QC_plots/mapping_QC_stats.txt", suffix(".txt"), ".load")
+# def loadmappingPlots(infile, outfile):
+#     P.load(infile, outfile, options='-i "sample_id" ')
+
+
+@follows(loadgetSampleInfo)
+@files(None, ["QC_plots/fragment_box.png",
+              "QC_plots/fragment_hist_all.png",
+              "QC_plots/fragment_hist_150.png",
+              "QC_plots/insert_sizes.txt"])
+def insertSizePlots(infile, outfiles):
+    '''Collect insert size metrics & generate plots'''
+
+    db = PARAMS["database"]
+    sample_info = DB.fetch_DataFrame('''select * from sample_info''', db)
+
+    def clean(df):
+        df["Filter"] = df["sample_id"].apply(lambda x: x.split(".")[-1])
+        df["Filter"] = df["sample_id"].apply(lambda x: x.split("_")[-1] if "size_filt_prep" not in x else "prep<150bp")
+        df["sample_id"] = df["sample_id"].apply(lambda x: x.rstrip("_prep"))
+        df["sample_id"] = df["sample_id"].apply(lambda x: x.split(".")[0])
+        df = pd.merge(df, sample_info, on="sample_id", how="inner")
+        return df
+
+    insert_sizes = DB.fetch_DataFrame('''select * from picardInsertSizeHistogram where sample_id like "%prep"''', db)
+    insert_sizes = clean(insert_sizes)
+    insert_sizes.to_csv(outfiles[3], sep="\t", header=True, index=False)   
+
+    # plots
+    sns.set(style="whitegrid", palette="muted")
+    
+    sns_fragment_box = sns.factorplot(data=insert_sizes, x="category", y="insert_size", hue="Filter", kind="box", size=4, aspect=2)
+    sns_fragment_box.savefig(outfiles[0])
+
+    sns_fragment_hist_all = sns.factorplot(data=insert_sizes[insert_sizes["Filter"]=="prep"], ci=None,
+                                           x="insert_size", y="All_Reads_fr_count", hue="Filter", kind="bar", size=4, aspect=2)
+    sns_fragment_hist_all.set(xticks=range(50, 1000, 50), xticklabels=range(50, 1000, 50))
+    sns_fragment_hist_all.set_xticklabels(rotation=30)
+    
+    sns_fragment_hist_all.savefig(outfiles[1])
+
+    sns_fragment_hist_size_filt = sns.factorplot(data=insert_sizes[insert_sizes["Filter"]=="prep<150bp"], ci=None,
+                                                 x="insert_size", y="All_Reads_fr_count", hue="Filter", kind="bar", size=4, aspect=2)
+    sns_fragment_hist_size_filt.set(xticks=range(10, 150, 10), xticklabels=range(10, 150, 10))
+    sns_fragment_hist_size_filt.set_xticklabels(rotation=30)
+    
+    sns_fragment_hist_size_filt.savefig(outfiles[2])
+
+    
+@follows(loadgetSampleInfo)
+@files(None, ["QC_plots/no_peaks.png",
+              "QC_plots/frip.png",
+              "QC_plots/peak_stats.txt"])
+def peakCallingPlots(infile, outfiles):
+    '''Collect peak calling info & generate plots'''
+
+    db = PARAMS["database"]
+    sample_info = DB.fetch_DataFrame('''select * from sample_info''', db)
+
+    peak_stats = DB.fetch_DataFrame('''select a.no_peaks, a.size_filt, b.FRIP, b.sample_id from no_peaks a, 
+                                    frip_table b where a.sample_id=b.sample_id and a.size_filt=b.size_filt ''', db)
+
+    peak_stats = pd.merge(peak_stats, sample_info, how="inner", on="sample_id")
+    peak_stats.to_csv(outfiles[2], sep="\t", header=True, index=False)
+    
+    sns.set(style="whitegrid", palette="muted")
+    sns_no_peaks = sns.factorplot(data=peak_stats, y="no_peaks", x="category", hue="size_filt", kind="bar", size=4, aspect=2)
+    sns_no_peaks.savefig(outfiles[0])
+    
+    sns_frip = sns.factorplot(data=peak_stats, y="FRIP", x="category", hue="size_filt", kind="bar", size=4, aspect=2)
+    sns_frip.savefig(outfiles[1])
+
+
+@follows(loadgetSampleInfo)
+@files(None, ["QC_plots/merged_peaksets.png",
+              "QC_plots/merged_peaksests.txt"])
+def mergedPeaksetPlots(infile, outfiles):
+    '''Plot number of peaks in merged peaksets'''
+
+    db = PARAMS["database"]
+    
+    merged_peaks = DB.fetch_DataFrame('''select * from no_peaks where merged like "%merged" ''', db)
+    merged_peaks.to_csv(outfiles[1], sep="\t", header=True, index=False)
+
+    sns.set(style="whitegrid", palette="muted")    
+    sns_merged_peakset = sns.factorplot(data=merged_peaks, kind="bar", y="no_peaks", x="sample_id", hue="size_filt", size=4, aspect=2)
+    sns_merged_peakset.savefig(outfiles[0])
+
+    
+@follows(loadgetSampleInfo, mappingPlots, insertSizePlots, peakCallingPlots, mergedPeaksetPlots)
+def QCplots():
+    pass
+
+
+@follows(loadgetSampleInfo)
 @files(None, "regulated_genes.dir/TSS.bed")
 def TSSbed(infile, outfile):
     '''Get TSSs for all genes'''
@@ -1548,7 +1866,7 @@ def TSSplot():
     
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(mapping, peakcalling, coverage, frip, count)
+@follows(mapping, peakcalling, coverage, frip, count, QCplots, TSSplot)
 def full():
     pass
 
