@@ -822,101 +822,43 @@ def filterPeaks(infiles, outfile):
 
     
 @follows(filterPeaks)
+@files(None, "macs2.dir/no_peaks.txt")
+def countPeaks(infiles, outfile):
+    
+    beds = glob.glob("/gfs/work/tkhoyratty/AirPouch_ATAC/analysis/atac_pipeline_trim/macs2.dir/*filt.bed")
+
+    # print beds
+    n = 0
+    no_peaks = {}
+
+    for bed in beds:
+        n = n + 1
+        name = os.path.basename(bed).replace("_peaks.filt.bed", "")
+        df = pd.read_csv(bed, sep="\t", header=None)
+
+        if n==1:
+            no_peaks = {name : len(df)}
+        else:
+            no_peaks[name] = len(df)
+
+    peaks = pd.DataFrame.from_dict(no_peaks, orient="index")
+
+    peaks["sample_id"] = peaks.index.values
+    peaks["size_filt"] = peaks["sample_id"].apply(lambda x: "all_fragments" if "size_filt" not in x else "<150bp")
+    peaks["sample_id"] = peaks["sample_id"].apply(lambda x: x.split(".")[0])
+    peaks = peaks.rename(columns={0:"no_peaks"})
+    peaks.reset_index(inplace=True, drop=True)
+
+    peaks.to_csv(outfile, header=True, index=False, sep="\t")
+
+    
+@transform(countPeaks, suffix(".txt"), ".load")
+def loadcountPeaks(infile, outfile):
+    P.load(infile, outfile, options='-i "sample_id" ')
+
+    
+@follows(loadcountPeaks)
 def peakcalling():
-    pass
-
-
-########################################################
-####              Coverage tracks                   ####
-########################################################
-@follows(peakcalling, mkdir("deeptools.dir"))
-@transform("bowtie2.dir/*.prep.bam",
-           regex(r"(.*).bam"),
-           r"\1.bam.bai")
-def indexPrepBam(infile, outfile):
-    '''samtools index bam'''
-
-    statement = '''samtools index -b %(infile)s %(outfile)s'''
-
-    P.run()
-
-    
-@follows(indexPrepBam)
-@transform("bowtie2.dir/*.prep.bam",
-           regex(r"bowtie2.dir/(.*).prep.bam"),
-           r"deeptools.dir/\1.coverage.bw")
-def bamCoverage(infile, outfile):
-    '''Make normalised bigwig tracks with deeptools'''
-
-    job_memory = "4G"
-    job_threads = "10"
-
-    if BamTools.isPaired(infile):
-
-        # PE reads filtered on sam flag 66 -> include only first read in properly mapped pairs
-        
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsingRPKM
-                    --samFlagInclude 66
-                    -p "max"'''
-        
-    else:
-
-        # SE reads filtered on sam flag 4 -> exclude unmapped reads
-        
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsingRPKM
-                    --samFlagExclude 4
-                    -p "max"'''
-
-    # added smoothLength = 20 to try and get better looking plots...
-    # --minMappingQuality 10 optional argument, but unnecessary as bams are alredy filtered
-    # centerReads option and small binsize should increase resolution around enriched areas
-
-    print statement
-    
-    P.run()
-
-
-@follows(indexPrepBam)
-@transform("bowtie2.dir/*.prep.bam",
-           regex(r"bowtie2.dir/(.*).prep.bam"),
-           r"deeptools.dir/\1.coverage.sizeFilt.bw")
-def bamCoverage_sizeFilter(infile, outfile):
-    '''Make normalised bigwig tracks with deeptools'''
-
-    job_memory = "2G"
-    job_threads = "10"
-
-    if BamTools.isPaired(infile):
-        
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --maxFragmentLength 150
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsingRPKM
-                    --samFlagInclude 66
-                    -p "max"'''
-        
-    else:
-        
-        statement = '''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > %(outfile)'''
-
-
-    print statement
-    
-    P.run()
-
-    
-@follows(bamCoverage, bamCoverage_sizeFilter)
-def coverage():
     pass
 
 
@@ -969,7 +911,7 @@ def generate_FRIPcountBAM_jobs():
                         yield ( [ [interval, bam], output ] )
 
                         
-@follows(mkdir("FRIP.dir"), coverage)
+@follows(mkdir("FRIP.dir"), peakcalling)
 @files(generate_FRIPcountBAM_jobs)
 def FRIPcountBAM(infiles, outfile):
     '''use bedtools to count reads in bed intervals'''
@@ -1064,7 +1006,7 @@ def loadFRIP(infile, outfile):
 def frip():
     pass
 
-
+    
 ########################################################
 ####                  Merge Peaks                   ####
 ########################################################
@@ -1423,9 +1365,102 @@ def count():
 
 
 ########################################################
+####              Coverage tracks                   ####
+########################################################
+@follows(count, mkdir("deeptools.dir"))
+@transform("bowtie2.dir/*.prep.bam",
+           regex(r"(.*).bam"),
+           r"\1.bam.bai")
+def indexPrepBam(infile, outfile):
+    '''samtools index bam'''
+
+    statement = '''samtools index -b %(infile)s %(outfile)s'''
+
+    P.run()
+
+    
+@follows(indexPrepBam)
+@transform("bowtie2.dir/*.prep.bam",
+           regex(r"bowtie2.dir/(.*).prep.bam"),
+           r"deeptools.dir/\1.coverage.bw")
+def bamCoverage(infile, outfile):
+    '''Make normalised bigwig tracks with deeptools'''
+
+    job_memory = "4G"
+    job_threads = "10"
+
+    if BamTools.isPaired(infile):
+
+        # PE reads filtered on sam flag 66 -> include only first read in properly mapped pairs
+        
+        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
+                    --binSize 5
+                    --smoothLength 20
+                    --centerReads
+                    --normalizeUsingRPKM
+                    --samFlagInclude 66
+                    -p "max"'''
+        
+    else:
+
+        # SE reads filtered on sam flag 4 -> exclude unmapped reads
+        
+        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
+                    --binSize 5
+                    --smoothLength 20
+                    --centerReads
+                    --normalizeUsingRPKM
+                    --samFlagExclude 4
+                    -p "max"'''
+
+    # added smoothLength = 20 to try and get better looking plots...
+    # --minMappingQuality 10 optional argument, but unnecessary as bams are alredy filtered
+    # centerReads option and small binsize should increase resolution around enriched areas
+
+    print statement
+    
+    P.run()
+
+
+@follows(indexPrepBam)
+@transform("bowtie2.dir/*.prep.bam",
+           regex(r"bowtie2.dir/(.*).prep.bam"),
+           r"deeptools.dir/\1.coverage.sizeFilt.bw")
+def bamCoverage_sizeFilter(infile, outfile):
+    '''Make normalised bigwig tracks with deeptools'''
+
+    job_memory = "2G"
+    job_threads = "10"
+
+    if BamTools.isPaired(infile):
+        
+        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
+                    --binSize 5
+                    --maxFragmentLength 150
+                    --smoothLength 20
+                    --centerReads
+                    --normalizeUsingRPKM
+                    --samFlagInclude 66
+                    -p "max"'''
+        
+    else:
+        
+        statement = '''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > %(outfile)'''
+
+
+    print statement
+    
+    P.run()
+
+    
+@follows(bamCoverage, bamCoverage_sizeFilter)
+def coverage():
+    pass
+
+########################################################
 ####                    QC Plots                    ####
 ########################################################
-@follows(count)
+@follows(coverage)
 @files(None, "regulated_genes.dir/TSS.bed")
 def TSSbed(infile, outfile):
     '''Get TSSs for all genes'''
