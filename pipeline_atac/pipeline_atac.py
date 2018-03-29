@@ -1921,11 +1921,19 @@ def TSSprofile(infile, outfile):
 @follows(TSSprofile)
 def TSSplot():
     pass        
-    
-    
+
+
+@follows(TSSplot):
+@transform("ATAC_Pipeline_Report.ipynb", suffix(".ipynb"), ".html")
+def makeReport(infile, outfile):
+    '''Generate html report on pipeline results from ipynb template'''
+
+    statement = '''jupyter nbconvert --to html --execute %(infile)s'''
+
+    P. run()
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(mapping, peakcalling, coverage, frip, count, QCplots, TSSplot)
+@follows(mapping, peakcalling, coverage, frip, count, QCplots, TSSplot, makeReport)
 def full():
     pass
 
