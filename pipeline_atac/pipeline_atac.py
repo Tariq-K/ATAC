@@ -1822,10 +1822,14 @@ def replicate_correlation(infile, outfiles):
     sns.set(style="whitegrid", palette="muted")# set seaborn theme
 
     # use dict to subset df of normalised counts & plot rep correlations
+    n = 0
+    palette = ["b", "g", "r", "c", "m", "y", "k", "w"]
     for key in reps:
+        n = n + 1
+        c = n - 1
         df = counts[reps[key]]
         df.columns = ["Rep1", "Rep2"]
-        p = sns.jointplot(data=df, y="Rep1", x="Rep2", kind="reg", size=7, color="g")
+        p = sns.jointplot(data=df, y="Rep1", x="Rep2", kind="reg", size=7, color=palette[c])
         plt.subplots_adjust(top=0.9)
         p.fig.suptitle(key) # add title
         out = "QC_plots/pearsonRepCorr_" + str(key) + ".png"
@@ -1924,16 +1928,31 @@ def TSSplot():
 
 
 @follows(TSSplot):
-@transform("ATAC_Pipeline_Report.ipynb", suffix(".ipynb"), ".html")
-def makeReport(infile, outfile):
+@files(None, "ATAC_Pipeline_Report.nbconvert.html")
+def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template'''
 
-    statement = '''jupyter nbconvert --to html --execute %(infile)s'''
+    template = PARAMS["report_path"]
+
+    if len(template)==0:
+        print "Specify Jupyter ipynb template path in pipeline.ini for html report generation"
+        pass
+
+    infile = outfile.replace(".nbconvert.html", ".ipynb")
+    nbconvert = infile.replace(".ipynb", ".nbconvert.ipynb")
+    tmp = os.path.basename(template)
+    
+    statement = '''cp %(template)s . ; checkpoint;
+                   jupyter nbconvert --to notebook --allow-errors --execute %(infile)s; checkpoint ;
+                   jupyter nbconvert --to html --execute %(nbconvert)s; checkpoint;
+                   rm %(tmp)s'''
 
     P. run()
+
+    
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(mapping, peakcalling, coverage, frip, count, QCplots, TSSplot, makeReport)
+@follows(mapping, peakcalling, coverage, frip, count, QCplots, TSSplot, report)
 def full():
     pass
 
