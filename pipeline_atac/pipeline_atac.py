@@ -918,6 +918,7 @@ def mergeReplicatePeaks(infiles, outfile):
     P.run()
 
 
+@follows(mergeReplicatePeaks)
 @files(None, "macs2.dir/no_peaks.txt")
 def countPeaks(infiles, outfile):
 
@@ -1759,7 +1760,7 @@ def peakCallingPlots(infile, outfiles):
 
 @follows(loadgetSampleInfo)
 @files(None, ["QC_plots/merged_peaksets.png",
-              "QC_plots/merged_peaksests.txt"])
+              "QC_plots/merged_peaksets.txt"])
 def mergedPeaksetPlots(infile, outfiles):
     '''Plot number of peaks in merged peaksets'''
 
@@ -1772,7 +1773,65 @@ def mergedPeaksetPlots(infile, outfiles):
     sns_merged_peakset = sns.factorplot(data=merged_peaks, kind="bar", y="no_peaks", x="sample_id", hue="size_filt", size=4, aspect=2)
     sns_merged_peakset.savefig(outfiles[0])
 
+
+@follows(loadgetSampleInfo)
+@files(None, ["QC_plots/pearsonRepCorr_*png"])
+def replicate_correlation(infile, outfiles):
+    '''Plot replicate correlation for counts in merged peakset'''
+
+    db = PARAMS["database"]
+    sample_info = DB.fetch_DataFrame('''select * from sample_info''', db)
+
+
+    # use reads < 150bp or all reads
+    if PARAMS["macs2_peaks"] == "all":
+        size_filt = "all_fragments"
+    if PARAMS["macs2_peaks"] == "size_filt":
+        size_filt = "<150bp"
     
+    statement = '''select sample_id, peak_id, RPM_width_norm *1000 as RPM 
+                   from all_norm_counts where size_filt == "%(size_filt)s" ''' % locals()
+    print statement
+    
+    def get_counts(statement):
+        # get df, filter on fragment size
+
+        df = DB.fetch_DataFrame(statement, db)
+
+        df = df.pivot("sample_id", "peak_id", "RPM").transpose()
+        df.index.name = None
+
+        # normalise to upper quantiles for between sample comparison
+        df = df.div(df.quantile(q=0.75, axis=0), axis=1)
+
+        return df
+    
+    counts = get_counts(statement)
+    counts.columns = sample_info["category"]
+    
+    # use sample information to get no. replicates & conditions
+    rep_pairs = sample_info.pivot("condition", "replicate", "category").transpose()
+    rep_pairs.columns.name = None
+    rep_pairs.index.name = None
+
+    # report replicates to dict
+    reps = {}
+    for col in rep_pairs.columns:
+        reps[col]=[rep_pairs[col].iloc[0], rep_pairs[col].iloc[1]]
+
+    sns.set(style="whitegrid", palette="muted")# set seaborn theme
+
+    # use dict to subset df of normalised counts & plot rep correlations
+    for key in reps:
+        df = counts[reps[key]]
+        df.columns = ["Rep1", "Rep2"]
+        p = sns.jointplot(data=df, y="Rep1", x="Rep2", kind="reg", size=7, color="g")
+        plt.subplots_adjust(top=0.9)
+        p.fig.suptitle(key) # add title
+        out = "QC_plots/pearsonRepCorr_" + str(key) + ".png"
+        p.savefig(out)# save fig to file here
+
+
 @follows(loadgetSampleInfo, mappingPlots, insertSizePlots, peakCallingPlots, mergedPeaksetPlots)
 def QCplots():
     pass
