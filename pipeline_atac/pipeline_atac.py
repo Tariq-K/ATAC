@@ -900,15 +900,17 @@ def mergeReplicatePeaks(infiles, outfile):
                 fold_change = str(np.mean([float(fold_change1), float(fold_change2)]))
                 pvalue = min(pvalue1, pvalue2)
                 qvalue = min(qvalue1, qvalue2)
-                peak_center = str(int(start) + (int(peak_width)/2))
 
+                #peak_center = str(int(start) + (int(peak_width)/2))
+                summit = str(int(start) + int(np.mean([int(summit1), int(summit2)])))
+                
                 # output
-                bed = [chr1, start, end, peak_id, peak_width, strand, fold_change, pvalue, qvalue, peak_center]
+                bed = [chr1, start, end, peak_id, peak_width, strand, fold_change, pvalue, qvalue, summit]
                 bed = '\t'.join(bed) + '\n'
 
                 if n == 1:
-                    output.write('\t'.join(["contig", "start", "end", "peak_id", "peak_width", "strand", "fold_change", 
-                                            "pvalue", "qvalue", "summit"]) + '\n')
+                    # output.write('\t'.join(["contig", "start", "end", "peak_id", "peak_width", "strand", "fold_change", 
+                    #                         "pvalue", "qvalue", "summit"]) + '\n')
                     output.write(bed)
                 else:
                     output.write(bed)
@@ -1690,7 +1692,7 @@ def mappingPlots(infile, outfiles):
 #     P.load(infile, outfile, options='-i "sample_id" ')
 
 
-@follows(loadgetSampleInfo)
+@follows(mappingPlots)
 @files(None, ["QC_plots/fragment_box.png",
               "QC_plots/fragment_hist_all.png",
               "QC_plots/fragment_hist_150.png",
@@ -1734,7 +1736,7 @@ def insertSizePlots(infile, outfiles):
     sns_fragment_hist_size_filt.savefig(outfiles[2])
 
     
-@follows(loadgetSampleInfo)
+@follows(insertSizePlots)
 @files(None, ["QC_plots/no_peaks.png",
               "QC_plots/frip.png",
               "QC_plots/peak_stats.txt"])
@@ -1758,7 +1760,7 @@ def peakCallingPlots(infile, outfiles):
     sns_frip.savefig(outfiles[1])
 
 
-@follows(loadgetSampleInfo)
+@follows(peakCallingPlots)
 @files(None, ["QC_plots/merged_peaksets.png",
               "QC_plots/merged_peaksets.txt"])
 def mergedPeaksetPlots(infile, outfiles):
@@ -1774,7 +1776,7 @@ def mergedPeaksetPlots(infile, outfiles):
     sns_merged_peakset.savefig(outfiles[0])
 
 
-@follows(loadgetSampleInfo)
+@follows(mergedPeaksetPlots)
 @files(None, ["QC_plots/pearsonRepCorr_*png"])
 def replicate_correlation(infile, outfiles):
     '''Plot replicate correlation for counts in merged peakset'''
@@ -1835,10 +1837,12 @@ def replicate_correlation(infile, outfiles):
         p.savefig(out)# save fig to file here
 
 
-@follows(loadgetSampleInfo, mappingPlots, insertSizePlots, peakCallingPlots, mergedPeaksetPlots)
+@follows(replicate_correlation)
 def QCplots():
     pass
 
+### Bug with QCplots - each function will run if called seperately, but calling all together
+### (or sequentially) causes a TkInter error: '_tkinter.TclError'> out of stack space (infinite loop?)
 
 @follows(loadgetSampleInfo)
 @files(None, "regulated_genes.dir/TSS.bed")
@@ -1931,7 +1935,7 @@ def TSSprofile(infiles, outfiles):
         n = n + 1
         c = n - 1
 
-        titles = ["All fragements", "Size Filter"]
+        titles = ["All fragments", "Size Filter"]
         title = "TSS enrichment - " + ''.join(titles[c])
         
         outfile = outfiles[c]
@@ -1939,7 +1943,8 @@ def TSSprofile(infiles, outfiles):
         statement = '''plotProfile
                            -m %(infile)s
                            --perGroup
-                           --plotTitle %(title)s
+                           --plotTitle "%(title)s"
+                           --regionsLabel ""
                            --yAxisLabel "ATAC signal (RPKM)"
                            -out %(outfile)s'''
 
