@@ -624,14 +624,14 @@ def picardInsertSizes(infile, outfile):
 
     tmp_dir = "$SCRATCH_DIR"
     
-    job_threads = "10"
-    job_memory = "40G"
+    job_threads = "3"
+    job_memory = "5G"
 
     pdf = outfile.replace("Metrics.txt", "Histogram.pdf")
     histogram = outfile.replace("Metrics.txt", "Histogram.txt")
     
     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint ;
-                   CollectInsertSizeMetrics
+                   java -Xms12G -Xmx14G -jar /gfs/apps/bio/picard-tools-2.15.0/picard.jar CollectInsertSizeMetrics
                      I=%(infile)s 
                      O=$tmp
                      H=%(pdf)s
@@ -900,8 +900,6 @@ def mergeReplicatePeaks(infiles, outfile):
                 fold_change = str(np.mean([float(fold_change1), float(fold_change2)]))
                 pvalue = min(pvalue1, pvalue2)
                 qvalue = min(qvalue1, qvalue2)
-
-                #peak_center = str(int(start) + (int(peak_width)/2))
                 summit = str(int(start) + int(np.mean([int(summit1), int(summit2)])))
                 
                 # output
@@ -1836,8 +1834,59 @@ def replicate_correlation(infile, outfiles):
         out = "QC_plots/pearsonRepCorr_" + str(key) + ".png"
         p.savefig(out)# save fig to file here
 
+        
+@follows(mergedPeaksetPlots)
+@files(None, ["QC_plots/peakWidth.txt", "QC_plots/peakWidth.png"])
+def peakWidths(infile, outfiles):
+    '''Plot replicate correlation for counts in merged peakset'''
+    
+    db = PARAMS["database"]
+    sample_info = DB.fetch_DataFrame('''select * from sample_info''', db)
 
-@follows(replicate_correlation)
+    peaks = glob.glob("macs2.dir/*merged*.bed")
+    all_peaks = [x for x in peaks if "size_filt" not in x]
+    sf_peaks = [x for x in peaks if "size_filt" in x]
+
+    def cat_df(df_list):
+
+        if "size_filt" in df_list[0]:
+            size_filt = "size_filt"
+        if "size_filt" not in df_list[0]:
+            size_filt = "all"
+
+            dfs = []
+            for peaks in df_list:
+                df = pd.read_csv(peaks, sep="\t", index_col=None, header=None)
+                df.columns = ["chr", "start", "end", "peak_id", "peak_width", "strand", "fold_change", "pvalue", "qvalue", "summit"]
+
+                df["sample_id"] = os.path.basename(str(peaks)).split("_")[0]
+                df["size_filt"] = size_filt
+
+                # drop peaks in chrUn* as these have odd peak widths
+                chr_filter = df["chr"].str.contains("chrUn_")
+                df = df[~chr_filter]
+                dfs.append(df)
+
+        dfs = pd.concat(dfs)
+
+
+        dfs = dfs[["chr", "start", "end", "peak_id", "peak_width", "sample_id", "size_filt"]]
+
+        return dfs
+
+    all_dfs = cat_df(all_peaks)
+    sf_peaks = cat_df(sf_peaks)
+    peaks = all_dfs.append(sf_peaks)
+    peaks.to_csv(outfiles[0], sep="\t", header=True, index=False)
+    
+    sns.set(style="whitegrid", palette="muted")
+    #sns.set_context("notebook", font_scale=1.5)
+    sns.factorplot(data=peaks[peaks.peak_width < 2000], y="peak_width", hue="size_filt", x="sample_id", kind="violin",
+                                  split=False, size=6, aspect=2)
+    sns.savefig(outfiles[1])
+
+    
+@follows(peakWidths)
 def QCplots():
     pass
 
