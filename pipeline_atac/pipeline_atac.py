@@ -588,11 +588,11 @@ def picardAlignmentSummary(infile, outfile):
     tmp_dir = "$SCRATCH_DIR"
     refSeq = os.path.join(PARAMS["annotations_genome_dir"], PARAMS["genome"] + ".fasta")
 
-    job_threads = "4"
+    job_threads = "3"
     job_memory = "5G"
     
     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint ;
-                   CollectAlignmentSummaryMetrics
+                   java -Xms12G -Xmx14G -jar /gfs/apps/bio/picard-tools-2.15.0/picard.jar CollectAlignmentSummaryMetrics
                      R=%(refSeq)s
                      I=%(infile)s
                      O=$tmp; checkpoint ;
@@ -1515,8 +1515,8 @@ def indexPrepBam(infile, outfile):
 def bamCoverage(infile, outfile):
     '''Make normalised bigwig tracks with deeptools'''
 
-    job_memory = "4G"
-    job_threads = "10"
+    job_memory = "2G"
+    job_threads = "20"
 
     if BamTools.isPaired(infile):
 
@@ -1551,45 +1551,45 @@ def bamCoverage(infile, outfile):
     P.run()
 
 
-@follows(indexPrepBam)
-@transform("bowtie2.dir/*.prep.bam",
-           regex(r"bowtie2.dir/(.*).prep.bam"),
-           r"deeptools.dir/\1.coverage.sizeFilt.bw")
-def bamCoverage_sizeFilter(infile, outfile):
-    '''Make normalised bigwig tracks with deeptools'''
+# @follows(indexPrepBam)
+# @transform("bowtie2.dir/*.prep.bam",
+#            regex(r"bowtie2.dir/(.*).prep.bam"),
+#            r"deeptools.dir/\1.coverage.sizeFilt.bw")
+# def bamCoverage_sizeFilter(infile, outfile):
+#     '''Make normalised bigwig tracks with deeptools'''
 
-    job_memory = "2G"
-    job_threads = "10"
+#     job_memory = "2G"
+#     job_threads = "10"
 
-    if BamTools.isPaired(infile):
+#     if BamTools.isPaired(infile):
         
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --maxFragmentLength 150
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsingRPKM
-                    --samFlagInclude 66
-                    -p "max"'''
+#         statement = '''bamCoverage -b %(infile)s -o %(outfile)s
+#                     --binSize 5
+#                     --maxFragmentLength 150
+#                     --smoothLength 20
+#                     --centerReads
+#                     --normalizeUsingRPKM
+#                     --samFlagInclude 66
+#                     -p "max"'''
         
-    else:
+#     else:
         
-        statement = '''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > %(outfile)'''
+#         statement = '''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > %(outfile)'''
 
 
-    print statement
+#     print statement
     
-    P.run()
+#     P.run()
 
     
-@follows(bamCoverage, bamCoverage_sizeFilter)
+@follows(bamCoverage)
 def coverage():
     pass
 
 ########################################################
 ####                    QC Plots                    ####
 ########################################################
-@follows(coverage, mkdir("QC_plots"))
+#@follows(coverage, mkdir("QC_plots"))
 @files(None, "sample_info.txt")
 def getSampleInfo(infile, outfile):
     '''Generate lookup table of sample info base on pipeline.ini'''
@@ -1782,7 +1782,6 @@ def replicate_correlation(infile, outfiles):
     db = PARAMS["database"]
     sample_info = DB.fetch_DataFrame('''select * from sample_info''', db)
 
-
     # use reads < 150bp or all reads
     if PARAMS["macs2_peaks"] == "all":
         size_filt = "all_fragments"
@@ -1882,44 +1881,70 @@ def TSSbed(infile, outfile):
 @transform(TSSbed,
            regex("regulated_genes.dir/TSS.bed"),
            add_inputs("deeptools.dir/*.coverage.bw"),
-           r"deeptools.dir/TSS.matrix.gz")
-def TSSmatrix(infiles, outfile):
+           ["deeptools.dir/TSS.all.matrix.gz", "deeptools.dir/TSS.size_filt.matrix.gz"])
+def TSSmatrix(infiles, outfiles):
 
-    #bed, bws = infiles
     bed = infiles[0]
     bws = [x for x in infiles if ".bw" in x]
-    
     job_threads = str(len(bws))
-
-    bws = ' '.join(bws)
     
-    statement = '''computeMatrix reference-point
-                     -S %(bws)s
-                     -R %(bed)s
-                     --missingDataAsZero
-                     -bs 10
-                     -a 2500
-                     -b 2500
-                     -p "max"
-                     -out %(outfile)s'''
+    all_reads = ' '.join([x for x in bws if "size_filt" not in x])
+    size_filt = ' '.join([x for x in bws if "size_filt" in x])
 
-    P.run()
+    jobs = [all_reads, size_filt]
+
+    db = PARAMS["database"]
+    sample_info = DB.fetch_DataFrame('''select * from sample_info''', db)
+    names = ' '.join(sample_info["category"].unique())
+    
+    n = 0
+    for job in jobs:
+        n = n + 1
+        c = n -1
+
+        outfile = outfiles[c]
+        
+        statement = '''computeMatrix reference-point
+                         -S %(job)s
+                         -R %(bed)s
+                         --missingDataAsZero
+                         -bs 10
+                         -a 2500
+                         -b 2500
+                         -p "max"
+                         --samplesLabel %(names)s
+                         -out %(outfile)s'''
+
+        print statement
+
+        P.run()
 
     
 @transform(TSSmatrix,
-           suffix(".matrix.gz"),
-           r"\1_profile.png")
-def TSSprofile(infile, outfile):
+           regex("deeptools.dir/TSS.(.*).matrix.gz"),
+           ["deeptools.dir/TSS.all.profile.png", "deeptools.dir/TSS.size_filt.profile.png"])
+def TSSprofile(infiles, outfiles):
     '''Plot profile over TSS'''
+    
+    n = 0
+    for infile in infiles:
+        n = n + 1
+        c = n - 1
 
-    statement = '''plotProfile
-                     -m %(infile)s
-                     --perGroup
-                     --plotTitle "TSS enrichment"
-                     --yAxisLabel "ATAC signal (RPKM)"
-                     -out %(outfile)s'''
+        titles = ["All fragements", "Size Filter"]
+        title = "TSS enrichment - " + ''.join(titles[c])
+        
+        outfile = outfiles[c]
+        
+        statement = '''plotProfile
+                           -m %(infile)s
+                           --perGroup
+                           --plotTitle %(title)s
+                           --yAxisLabel "ATAC signal (RPKM)"
+                           -out %(outfile)s'''
 
-    P.run()
+        print statement
+        P.run()
 
     
 @follows(TSSprofile)
@@ -1927,7 +1952,7 @@ def TSSplot():
     pass        
 
 
-@follows(TSSplot):
+@follows(TSSplot)
 @files(None, "ATAC_Pipeline_Report.nbconvert.html")
 def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template'''
@@ -1952,7 +1977,7 @@ def report(infile, outfile):
     
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(mapping, peakcalling, coverage, frip, count, QCplots, TSSplot, report)
+@follows(mapping, peakcalling, coverage, frip, count, TSSplot, report)
 def full():
     pass
 
