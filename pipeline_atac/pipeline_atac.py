@@ -1157,10 +1157,10 @@ def mergePeaks(infiles, outfile):
     infiles = ' '.join(infiles)
 
     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
-                   cat %(infiles)s | grep -v ^chrUn* -  > $tmp; checkpoint;
+                   cat %(infiles)s | grep -v ^chrUn* - > $tmp; checkpoint;
                    awk 'BEGIN {OFS="\\t"} {center = $2 + $10 ; start = center - %(offset)s ; end = center + %(offset)s ;
                      print $1,start,end,$4,$5}' $tmp | 
-                   awk 'BEGIN {OFS="\\t"} {if ($2 < $3) print $0}' - |
+                   awk 'BEGIN {OFS="\\t"} {if (($2 < $3) && ($2 > 0)) print $0}' - |
                    sort -k1,1 -k2,2n |
                    mergeBed -c 4,5 -o count,mean -i - |
                    awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,"merged_peaks_"NR,$5,$4,$3-$2,sprintf("%%i", ($2+$3)/2)}' - > %(outfile)s; checkpoint;
@@ -1589,7 +1589,7 @@ def coverage():
 ########################################################
 ####                    QC Plots                    ####
 ########################################################
-#@follows(coverage, mkdir("QC_plots"))
+@follows(coverage, mkdir("QC_plots"))
 @files(None, "sample_info.txt")
 def getSampleInfo(infile, outfile):
     '''Generate lookup table of sample info base on pipeline.ini'''
@@ -2007,28 +2007,38 @@ def TSSplot():
 
 
 @follows(TSSplot)
-@files(None, "ATAC_Pipeline_Report.nbconvert.html")
+@files(None, "*.nbconvert.html")
 def report(infile, outfile):
-    '''Generate html report on pipeline results from ipynb template'''
+    '''Generate html report on pipeline results from ipynb template(s)'''
 
-    template = PARAMS["report_path"]
+    templates = PARAMS["report_path"]
+    templates = templates.split(",")
 
-    if len(template)==0:
+    if len(templates)==0:
         print "Specify Jupyter ipynb template path in pipeline.ini for html report generation"
         pass
 
-    infile = outfile.replace(".nbconvert.html", ".ipynb")
-    nbconvert = infile.replace(".ipynb", ".nbconvert.ipynb")
-    tmp = os.path.basename(template)
+    for template in templates:
+        infile = os.path.basename(template)
+        outfile = infile.replace(".ipynb", ".nbconvert.html")
+        nbconvert = infile.replace(".ipynb", ".nbconvert.ipynb")
+        tmp = os.path.basename(template)
     
-    statement = '''cp %(template)s . ; checkpoint;
-                   jupyter nbconvert --to notebook --allow-errors --execute %(infile)s; checkpoint ;
-                   jupyter nbconvert --to html --execute %(nbconvert)s; checkpoint;
+        statement = '''cp %(template)s . ; checkpoint;
+                   jupyter nbconvert 
+                     --to notebook 
+                     --allow-errors 
+                     --ExecutePreprocessor.timeout=360
+                     --execute %(infile)s; checkpoint ;
+                   jupyter nbconvert 
+                     --to html 
+                     --ExecutePreprocessor.timeout=360
+                     --execute %(nbconvert)s; checkpoint;
                    rm %(tmp)s'''
 
-    P. run()
-
+        P. run()
     
+
 # ---------------------------------------------------
 # Generic pipeline tasks
 @follows(mapping, peakcalling, coverage, frip, count, TSSplot, report)
