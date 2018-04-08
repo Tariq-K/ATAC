@@ -1,0 +1,206 @@
+################################################################
+#
+#
+# Pipeline pipeline_src.py configuration file for sphinxreport
+#
+# 
+################################################################
+## general options
+[general]
+
+
+rsource=/ifs/devel/stephens/chartseq/src/PipelineChartseq.R
+
+tracks=/ifs/projects/stephens/chartseq/tracks_both/
+expression=/ifs/projects/stephens/chartseq/expression/
+
+features=/ifs/projects/stephens/chartseq/features2/
+annot=/ifs/projects/stephens/chartseq/annotations/
+
+ren_dir=/ifs/projects/stephens/chartseq/renlabTracks/
+dnase_dir=/ifs/projects/stephens/chartseq/dnaseTracks/
+srcdir=/ifs/projects/stephens/chartseq/src
+
+#paupar
+paupar_sequence=/ifs/projects/stephens/chartseq/annotations/paupar.fasta
+
+# the genome to use
+genome=mm9
+
+# directory where exported data is located
+exportdir=export
+
+# location of indexed genome 
+genome_dir=/ifs/mirror/genomes/plain
+
+# name of database
+database=csvdb
+
+
+#promoter length
+promoter=10000
+
+# database options for csv2db script
+csv2db_options=--backend=sqlite --retry --map=gene_id:str --map=contig:str --map=transcript_id:str 
+
+# scratchdir for data not to be backed up
+scratchdir=/tmp
+
+# a version string
+version=
+
+[memechip]
+transfac_meme=/ifs/data/biobase/meme/transfac_matrix.meme
+transfac_matrices=/ifs/data/biobase/transfac/dat/matrix.dat
+nmotif=100
+npeaks=50,100,500,1000,2000,all
+widths=100,200,500
+mask=none
+
+[mast]
+motifs=pax6,rest,nrsf,brn2,pou3f2
+mask=none
+
+
+[arrays]
+dir=/ifs/projects/stephens/chartseq/arrays/
+database=/ifs/projects/stephens/chartseq/arrays/csvdb
+rsource=/ifs/devel/stephens/chartseq/src/PipelineAffyGene.R
+nisochores=5
+de_dir=/ifs/projects/stephens/chartseq/paupar_arrays/
+
+
+################################################################
+#
+# Location of annotation database
+#
+################################################################
+[annotations]
+host=may2012.archive.ensembl.org
+mm10_host=www.ensembl.org
+dataset=mmusculus_gene_ensembl
+liftdown=/ifs/mirror/ucsc/mm10/liftOver/mm10ToMm9.over.chain.gz
+liftup=/ifs/mirror/ucsc/mm9/liftOver/mm9ToMm10.over.chain.gz
+
+database=/ifs/data/annotations/mm9_ensembl67/csvdb
+genes=annotations/ens_67_mm9_ensembl_protein_coding_known_genes.txt
+mm9dir=/ifs/data/annotations/mm9_ensembl67/
+genetss=tss.gene.bed.gz
+
+
+# directory with annotation information
+#dir9=/ifs/data/annotations/mm9_ensembl67
+
+# eek, trust that we're not screwing any coordinates...
+dir=/ifs/data/annotations/mm10_ensembl70_old
+
+# csv file from ensembl with MOE430_v2 array annotations
+mogene=annotations/mogene.tsv
+
+# csv file with mouse housekeeping gene information
+house=/ifs/projects/proj009/annotations/de_Jonge_2007_mouse_housekeeping.txt
+
+iso=annotations.dir/ensg.iso.strata.5.txt
+
+
+[results]
+database="csvdb"
+
+
+################################################################
+#
+# sphinxreport build options
+#
+################################################################
+[report]
+# number of threads to use to build the documentation
+threads=10
+
+# directory for html documentation
+html=report/html
+
+# directory for doctrees
+doctrees=report/doctrees
+
+##################################################################
+#
+# Tissue-specific gene expression
+#
+####################################################################
+
+[tse]
+geomatrix=/ifs/projects/proj009/data/GSE10246/cels/gcrma_norm_exprs_matrix.txt
+index=/ifs/projects/proj009/data/GSE10246/index_from_cluster
+
+
+################################################################
+################################################################
+################################################################
+## gat options
+################################################################
+[gat]
+#
+threads=6
+go_threads=2
+
+# number of samples
+num_samples=10000
+
+# mapability track to use
+mapability=50
+
+# fdr to filter
+fdr=0.05
+
+# minimum expected overlap for results to be reported
+min_expected=1000
+
+workspace=/ifs/data/annotations/mm9_ensembl67/mapability/mapability_50.filtered.bed.gz
+isochore=/ifs/data/annotations/mm9_ensembl64/gcprofile_bins.bed.gz
+
+
+##################################################################
+## go analysis
+##################################################################
+[go]
+imputed=go_geneontology.imputed.tsv.gz
+
+minimum_counts=3
+
+
+##################################################################
+## ehancer analysis
+##################################################################
+[enhancer]
+
+#bam files to use
+h3k4me1_rep1=/ifs/projects/stephens/chartseq/annotations/wgEncodeLicrHistoneWbrainH3k04me1UE14halfC57bl6StdAlnRep1V2.bam
+h3k4me1_rep2=/ifs/projects/stephens/chartseq/annotations/wgEncodeLicrHistoneWbrainH3k04me1UE14halfC57bl6StdAlnRep2V2.bam
+h3k4me3_rep1=/ifs/projects/stephens/chartseq/annotations/wgEncodeLicrHistoneWbrainH3k04me3UE14halfC57bl6StdAlnRep1V2.bam
+h3k4me3_rep2=/ifs/projects/stephens/chartseq/annotations/wgEncodeLicrHistoneWbrainH3k04me3UE14halfC57bl6StdAlnRep2.bam
+
+window=250
+
+###################################################################
+## features
+#####################################################################
+[features]
+padding=250
+
+[great]
+#extend basal domain up and down (bp)
+basal_up=5000
+basal_down=1000
+
+#maximum extension (bp)
+max=1000000
+
+#restrict extensions to half way to the nearest gene (False|True)
+half=False
+
+[water]
+open=30
+extend=6
+
+
+
