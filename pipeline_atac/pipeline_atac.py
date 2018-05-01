@@ -878,6 +878,7 @@ def mergeReplicatePeaks(infiles, outfile):
         with open(tmp, "r") as o:
             for line in o:
                 n = n + 1
+                
                 fields = [x.strip('"\n') for x in line.split("\t")]
 
                 # destructure list, assign items to variables
@@ -885,8 +886,9 @@ def mergeReplicatePeaks(infiles, outfile):
                 chr2, start2, end2, peak_id2, peak_width2, strand2, fold_change2, pvalue2, qvalue2, summit2] = fields
 
                 # merge columns between reps as appropriate
-                start = min(start1, end1, start2, end2)
-                end = max(start1, end1, start2, end2)
+                pos = [int(start1), int(end1), int(start2), int(end2)]
+                start = str(min(pos))
+                end = str(max(pos))
                 peak_width = str(int(end) - int(start))
                 peak_id = '.'.join([peak_id1, peak_id2])
 
