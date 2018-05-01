@@ -501,7 +501,7 @@ def runMemeAnalysis():
     pass
 
 
-#@follows(runMemeAnalysis)
+@follows(runMemeAnalysis)
 @files(None, "*.nbconvert.html")
 def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template(s)'''
