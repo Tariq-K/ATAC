@@ -414,7 +414,7 @@ def filterBam(infile, outfile):
 def removeDuplicates(infile, outfile):
     '''PicardTools remove duplicates'''
 
-    job_memory = "5G"
+    job_memory = "12G"
     job_threads = "2"
     
     metrics_file = outfile + ".picardmetrics"
@@ -625,7 +625,7 @@ def picardInsertSizes(infile, outfile):
     tmp_dir = "$SCRATCH_DIR"
     
     job_threads = "3"
-    job_memory = "5G"
+    job_memory = "8G"
 
     pdf = outfile.replace("Metrics.txt", "Histogram.pdf")
     histogram = outfile.replace("Metrics.txt", "Histogram.txt")
@@ -736,7 +736,7 @@ def macs2callpeaks(infile, outfile):
     if BamTools.isPaired(infile):
 
         options = PARAMS["macs2_pe_options"]
-        name = os.path.basename(outfile).rstrip(".macs2.log")
+        name = os.path.basename(outfile).replace(".macs2.log", "")
         
         statement='''macs2 callpeak 
                        --outdir macs2.dir                  
@@ -922,8 +922,8 @@ def mergeReplicatePeaks(infiles, outfile):
 @files(None, "macs2.dir/no_peaks.txt")
 def countPeaks(infiles, outfile):
 
-    beds = glob.glob("/gfs/work/tkhoyratty/AirPouch_ATAC/analysis/atac_pipeline_trim/macs2.dir/*filt.bed")
-    merge_beds = glob.glob("/gfs/work/tkhoyratty/AirPouch_ATAC/analysis/atac_pipeline_trim/macs2.dir/*merged*.bed")
+    beds = glob.glob("./macs2.dir/*filt.bed")
+    merge_beds = glob.glob("./macs2.dir/*merged*.bed")
 
     peaksets = [beds, merge_beds]
 
