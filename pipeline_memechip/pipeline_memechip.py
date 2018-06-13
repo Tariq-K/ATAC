@@ -500,8 +500,67 @@ def loadFimo(infile, outfile):
 def runMemeAnalysis():
     pass
 
+################################################
+#####        Find motifs with HOMER        #####
+################################################
+#@follows(runMemeAnalysis, mkdir("homer.chip.dir"))
+@transform("meme.seq.dir/*.foreground.fasta",
+           regex(r"meme.seq.dir/(.*).foreground.fasta"),
+           r"homer.chip.dir/\1.homer.log")
+def runHomerFindMotifs(infile, outfile):
+    '''run Homer findMotifs.pl on fasta sequences'''
 
-@follows(runMemeAnalysis)
+    outdir = outfile.replace(".homer.log", "")
+    bfile = infile.replace(".foreground.fasta", ".background.fasta")
+
+    statement = '''if [ ! -d %(outdir)s ]; 
+                     then mkdir %(outdir)s; 
+                     fi;
+                   findMotifs.pl 
+                     %(infile)s 
+                     fasta 
+                     %(outdir)s 
+                     -fastaBg %(bfile)s
+                     &> %(outfile)s''' % locals()
+
+    P.run()
+
+@follows(runHomerFindMotifs, mkdir("homer.genome.dir"))
+@transform("meme.seq.dir/*foreground.bed",
+           regex(r"meme.seq.dir/(.*).foreground.bed"),
+           r"homer.genome.dir/\1.homer.log")
+def runHomerFindMotifsGenome(infile, outfile):
+    '''Run homer findMotifsGenome.pl with default settings and background'''
+
+    # Homer requires input peaks to have strand (+/- : 0/1) in 6th column
+    # Also, sequence length must be specified, default = 200
+
+    tmp_dir = "$SCRATCH_DIR"
+    outdir = outfile.replace(".homer.log", "")
+    
+    statement = '''peaks=`mktemp -p %(tmp_dir)s`; checkpoint;
+                  awk 'BEGIN {OFS="\\t"} {print $0,0}' %(infile)s > $peaks; checkpoint; 
+                  findMotifsGenome.pl 
+                    $peaks
+                    mm10
+                    %(outdir)s
+                    -h
+                    -size 200
+                    &> %(outfile)s; checkpoint;
+                  rm $peaks'''
+    
+    P.run()
+    
+
+@follows(runHomerFindMotifs, runHomerFindMotifsGenome)
+def runHomerAnalysis():
+    pass
+
+@follows(runMemeAnalysis, runHomerAnalysis)
+def runMotifAnalysis():
+    pass
+
+@follows(runMotifAnalysis)
 @files(None, "*.nbconvert.html")
 def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template(s)'''
@@ -803,7 +862,7 @@ def runMemeMast(infiles, outfile):
 ###############################################################################
 ########################### Pipeline Targets ##################################
 ###############################################################################
-@follows(runMemeAnalysis, report)
+@follows(runMotifAnalysis, report)
 def full():
     pass
 
