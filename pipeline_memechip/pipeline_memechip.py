@@ -116,6 +116,9 @@ import CGAT.Bed as BED
 import CGAT.IOTools as IO
 import CGAT.FastaIterator as FastaIterator
 import CGAT.Database as Database
+import matplotlib
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 # load options from the config file
 PARAMS = P.getParameters(
@@ -306,21 +309,19 @@ def runMemeChIP(infile, outfile):
             
     nmeme_list = PARAMS["memechip_npeaks"].split(",")
 
-    print nmeme_list
     if "all" in nmeme_list: # get max file length if assessing all peaks
         meme_beds = glob.glob("data.dir/*_meme.bed")
-        print meme_beds
-#        if len(meme_beds)==0:
-#            yield []
+
+        if len(meme_beds)==0:
+            yield []
+
         bed = max([len(pd.read_csv(x, sep="\t")) for x in meme_beds])
         param = max([int(x) for x in nmeme_list if "all" not in x])
         nmeme = max([bed, param])
+        
     else: # or max length from npeaks list
         nmeme = max([int(x) for x in nmeme_list])
 
-        
-    print nmeme
-    
     # ccut - The maximum length of a sequence to use before it is trimmed to a central region of this size.
             # A value of 0 indicates that sequences should not be trimmed.
 
@@ -339,7 +340,6 @@ def runMemeChIP(infile, outfile):
     #     - Takes 10x more computing power than option 1 and is less sensitive to weak, non-repeated motifs
 
     mode = PARAMS["memechip_mode"]
-
     
     if mode == "anr": 
         job_memory = "5G"
@@ -365,8 +365,6 @@ def runMemeChIP(infile, outfile):
                    > %(outfile)s
                 ''' % locals()
 
-    print statement
-
     P.run()
 
 def loadMemeTomTomGenerator():
@@ -391,7 +389,6 @@ def loadMemeTomTomGenerator():
                 if n > 1:
                     yield [ infile, outfile ]
                     
-
 @follows(runMemeChIP)
 @files(loadMemeTomTomGenerator)
 def loadMemeTomTom(infile, outfile):
@@ -477,17 +474,10 @@ def summarizeFimo(infiles, outfile):
 
     tmp_dir = "$SCRATCH_DIR"
 
-    print infiles
     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
                    cat %(infiles)s | grep -v "#" | sort -k1,1n > $tmp; checkpoint;
                    [[ -s $tmp ]] && mv $tmp %(outfile)s || rm $tmp'''
 
-        
-    # statement = '''cat %(infiles)s | grep -v "#" | sort -k1,1n > %(outfile)s; checkpoint;
-    #                [[ -s %(outfile)s ]] || rm %(outfile)s'''
-
-    print statement
-    
     P.run()
     
 @transform(summarizeFimo, suffix(".txt"), ".load")
@@ -550,9 +540,87 @@ def runHomerFindMotifsGenome(infile, outfile):
                   rm $peaks'''
     
     P.run()
-    
 
-@follows(runHomerFindMotifs, runHomerFindMotifsGenome)
+@follows(runHomerFindMotifs, mkdir("motifsCoverage.dir"))
+@transform("meme.seq.dir/*.foreground.bed",
+           regex(r"meme.seq.dir/(.*).foreground.bed"),
+           r"motifsCoverage.dir/\1.motifCoverage.txt")
+def annotatePeaks(infile, outfile):
+    '''Annotate peaks w/ top discovered motifs for histogram plots'''
+
+    # get original input peak file for motif search
+    run = os.path.basename(infile).replace(".foreground.bed", "")
+    name = run.split(".")[0]
+    peak_file = "data.dir/" + name + ".bed"
+
+    # # select top motifs to search for
+    # motifs = "homer.chip.dir/" + run + "/homerResults/motif[1-6].motif"
+
+    # search for all discovered motifs
+    motifs = "homer.chip.dir/" + run + "/homerResults/motif*.motif"
+    
+    statement = '''annotatePeaks.pl 
+                     %(peak_file)s
+                     mm10 
+                     -size 1000 
+                     -hist 5 
+                     -m %(motifs)s
+                     > %(outfile)s'''
+    P.run()
+
+@transform(annotatePeaks,
+           regex(r"(.*).motifCoverage.txt"),
+           r"\1.motifEnrichment.png")
+def homerMotifEnrichmentPlot(infile, outfile):
+    '''Process results from annotatePeaks and plot motif enrichment relative to peaks'''
+
+    homerResults = pd.read_csv(infile, sep="\t", header=0)
+
+    # get plot title
+    title = infile.split("/")[-1]
+
+    # select total counts for motifs in sequences
+    motifs = homerResults[[x for x in homerResults.columns if "total" in x]]
+    motifs.columns = [x.split(":")[-1].split("/")[0] for x in motifs.columns] # simplify motif names
+
+    # get position information
+    motifDist = homerResults.iloc[:, 0:1]
+    motifDist.columns = ["dist_from_center"]
+
+    # rejoin dfs
+    processed_results = pd.concat([motifDist, motifs], axis=1)
+
+    # melt data
+    processed_results = processed_results.melt(id_vars=["dist_from_center"])
+    processed_results.columns = ["dist_from_center", "motif", "motifs_per_bp_per_peak"]
+
+    # set plot style
+    matplotlib.style.use(["seaborn-ticks", "seaborn-deep", "seaborn-notebook"])
+    palette = ["r", "g", "b", "c", "m", "y", "k", "w"]
+
+    n = 0
+    cols = {}
+    for i in processed_results["motif"].unique():
+        n = n + 1
+
+        if limit_motifs:
+            if n > limit_motifs:
+                break
+
+        color = palette[n]
+        cols[i] = color
+
+        df = processed_results[processed_results["motif"] == i]
+
+        plt.plot(df["dist_from_center"], df["motifs_per_bp_per_peak"], label=''.join(df["motif"].unique()))
+
+    plt.legend()
+    plt.title(title)
+    plt.savefig(outfile, dpi=300, format="png", facecolor='w', edgecolor='w',
+                orientation='portrait', papertype=None, transparent=False)
+    plt.close() 
+    
+@follows(runHomerFindMotifs, runHomerFindMotifsGenome, homerMotifEnrichmentPlot)
 def runHomerAnalysis():
     pass
 
