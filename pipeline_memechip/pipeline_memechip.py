@@ -120,47 +120,35 @@ import matplotlib
 from matplotlib import pyplot as plt
 import seaborn as sns
 
+
 # load options from the config file
 PARAMS = P.getParameters(
     ["%s/pipeline.ini" % os.path.splitext(__file__)[0],
      "../pipeline.ini",
      "pipeline.ini"])
 
-# add configuration values from associated pipelines
-#
-# 1. pipeline_annotations: any parameters will be added with the
-#    prefix "annotations_". The interface will be updated with
-#    "annotations_dir" to point to the absolute path names.
-PARAMS.update(P.peekParameters(
-    PARAMS["annotations_dir"],
-    "pipeline_annotations.py",
-    on_error_raise=__name__ == "__main__",
-    prefix="annotations_",
-    update_interface=True))
-
-
-# if necessary, update the PARAMS dictionary in any modules file.
-# e.g.:
-#
-# import CGATPipelines.PipelineGeneset as PipelineGeneset
-# PipelineGeneset.PARAMS = PARAMS
-#
-# Note that this is a hack and deprecated, better pass all
-# parameters that are needed by a function explicitely.
-
 # -----------------------------------------------
 # Utility functions
 
-def connect():
-    '''utility function to connect to database. Use this method to connect to the pipeline database.
-    Additional databases can be attached here as well. Returns an sqlite3 database handle. '''
+# def connect():
+#     '''utility function to connect to database. Use this method to connect to the pipeline database.
+#     Additional databases can be attached here as well. Returns an sqlite3 database handle. '''
 
-    dbh = sqlite3.connect(PARAMS["database"])
-    statement = '''ATTACH DATABASE '%s' as annotations'''% (
-        PARAMS["annotations_database"])
-    cc = dbh.cursor()
-    cc.execute(statement)
-    cc.close()
+#     dbh = sqlite3.connect(PARAMS["database"])
+#     statement = '''ATTACH DATABASE '%s' as annotations'''% (
+#         PARAMS["annotations_database"])
+#     cc = dbh.cursor()
+#     cc.execute(statement)
+#     cc.close()
+
+#     return dbh
+
+def connect():
+    '''
+    Setup a connection to an sqlite database
+    '''
+
+    dbh = sqlite3.connect(PARAMS['database'])
 
     return dbh
 
@@ -168,7 +156,7 @@ def connect():
 ################################################
 #####              Meme-ChIP               #####
 ################################################
-@follows(connect)
+#@follows(connect)
 @transform("data.dir/*.bed",
            regex(r"(.*).bed"),
            r"\1_meme.bed")
@@ -176,7 +164,7 @@ def peakSummit(infile, outfile):
     '''Make bed of peak_summit (+/- 1bp), sorted by peak qvalue'''
 
     infile = ''.join([x for x in [infile] if "_meme" not in x]) # prevent re-running of this job
-    print infile
+
     if os.path.isfile(infile):
         df = pd.read_csv(infile, sep="\t", header=None)
 
@@ -260,20 +248,13 @@ def getMemeBackgroundBed(infile, outfile):
            regex(r"(.*).bed"),
            r"\1.fasta")
 def getMemeSequences(infile, outfile):
-    '''get the peak sequences, masking or not specificed in the ini file.'''
+    '''Get the peak sequences. The genome sequences are already repeat soft-masked'''
   
     genome_fasta = os.path.join(PARAMS["genome_dir"],PARAMS["genome"]+".fasta")
     genome_idx = os.path.join(PARAMS["annotations_mm10dir"],"assembly.dir/contigs.tsv")
-    mask = PARAMS["memechip_mask"]
-    
-    if mask != "none":
-        mask_opt = "-m " + mask
-    else:
-        mask_opt = ""
-        
-    statement = '''cat %(infile)s | python ~/devel/cgat/scripts/bed2fasta.py %(mask_opt)s -g %(genome_fasta)s 
-                | grep -v "#" > %(outfile)s''' % locals()
 
+    statement = '''fastaFromBed -fi %(genome_fasta)s -bed %(infile)s -fo %(outfile)s'''
+    
     P.run()
 
 @follows(getMemeSequences)
@@ -296,6 +277,7 @@ def runMemeChIP(infile, outfile):
     bfile= infile.replace(".foreground.fasta", ".background.bfile")
 
     motifDb =  " -db ".join(P.asList(PARAMS["memechip_motif_db"])) # Meme-Chip needs eac db in list to have "-db" flag
+
     nmotifs = PARAMS["memechip_nmotif"]
     meme_max_jobs = PARAMS["memechip_meme_maxsize"]
 
@@ -308,12 +290,14 @@ def runMemeChIP(infile, outfile):
             # specified in pipeline.ini
             
     nmeme_list = PARAMS["memechip_npeaks"].split(",")
-
+    print(nmeme_list)
+    
     if "all" in nmeme_list: # get max file length if assessing all peaks
         meme_beds = glob.glob("data.dir/*_meme.bed")
 
-        if len(meme_beds)==0:
-            yield []
+        # if len(meme_beds)==0:
+        #     print(len(meme_beds))
+        #     yield []
 
         bed = max([len(pd.read_csv(x, sep="\t")) for x in meme_beds])
         param = max([int(x) for x in nmeme_list if "all" not in x])
@@ -321,7 +305,8 @@ def runMemeChIP(infile, outfile):
         
     else: # or max length from npeaks list
         nmeme = max([int(x) for x in nmeme_list])
-
+        # no of sequences actually determined by infile, this just prevents truncation
+        
     # ccut - The maximum length of a sequence to use before it is trimmed to a central region of this size.
             # A value of 0 indicates that sequences should not be trimmed.
 
@@ -340,16 +325,9 @@ def runMemeChIP(infile, outfile):
     #     - Takes 10x more computing power than option 1 and is less sensitive to weak, non-repeated motifs
 
     mode = PARAMS["memechip_mode"]
+
+    job_memory = "5G"
     
-    if mode == "anr": 
-        job_memory = "5G"
-        #job_threads = "12"
-    else:
-        job_memory ="5G"
-        #job_threads = "6"
-
-    # -meme-p %(job_threads)s
-
     statement = '''meme-chip
                    -oc %(outdir)s
                    -db %(motifDb)s
@@ -363,10 +341,11 @@ def runMemeChIP(infile, outfile):
                    -meme-maxsize %(meme_max_jobs)s
                    %(infile)s
                    > %(outfile)s
-                ''' % locals()
-
+                ''' 
+    
     P.run()
 
+    
 def loadMemeTomTomGenerator():
 
     meme_tomtom = glob.glob("meme.chip.dir/*memechip")
@@ -493,7 +472,7 @@ def runMemeAnalysis():
 ################################################
 #####        Find motifs with HOMER        #####
 ################################################
-#@follows(runMemeAnalysis, mkdir("homer.chip.dir"))
+@follows(runMemeAnalysis, mkdir("homer.chip.dir"))
 @transform("meme.seq.dir/*.foreground.fasta",
            regex(r"meme.seq.dir/(.*).foreground.fasta"),
            r"homer.chip.dir/\1.homer.log")
@@ -567,60 +546,75 @@ def annotatePeaks(infile, outfile):
                      -m %(motifs)s
                      > %(outfile)s'''
     P.run()
-
+                  
 @transform(annotatePeaks,
-           regex(r"(.*).motifCoverage.txt"),
-           r"\1.motifEnrichment.png")
+            regex(r"(.*).motifCoverage.txt"),
+            r"\1.motifEnrichment.png")
+# @transform("test.dir/*txt",
+#            regex(r"(.*).motifCoverage.txt"),
+#            r"\1.motifEnrichment.png")
+
 def homerMotifEnrichmentPlot(infile, outfile):
     '''Process results from annotatePeaks and plot motif enrichment relative to peaks'''
 
-    homerResults = pd.read_csv(infile, sep="\t", header=0)
+    statement = '''python motifPlot.py %(infile)s %(outfile)s'''
 
-    # get plot title
-    title = infile.split("/")[-1]
-
-    # select total counts for motifs in sequences
-    motifs = homerResults[[x for x in homerResults.columns if "total" in x]]
-    motifs.columns = [x.split(":")[-1].split("/")[0] for x in motifs.columns] # simplify motif names
-
-    # get position information
-    motifDist = homerResults.iloc[:, 0:1]
-    motifDist.columns = ["dist_from_center"]
-
-    # rejoin dfs
-    processed_results = pd.concat([motifDist, motifs], axis=1)
-
-    # melt data
-    processed_results = processed_results.melt(id_vars=["dist_from_center"])
-    processed_results.columns = ["dist_from_center", "motif", "motifs_per_bp_per_peak"]
-
-    # set plot style
-    matplotlib.style.use(["seaborn-ticks", "seaborn-deep", "seaborn-notebook"])
-    palette = ["r", "g", "b", "c", "m", "y", "k", "w"]
-
-    n = 0
-    cols = {}
-    for i in processed_results["motif"].unique():
-        n = n + 1
-
-        if limit_motifs:
-            if n > limit_motifs:
-                break
-
-        color = palette[n]
-        cols[i] = color
-
-        df = processed_results[processed_results["motif"] == i]
-
-        plt.plot(df["dist_from_center"], df["motifs_per_bp_per_peak"], label=''.join(df["motif"].unique()))
-
-    plt.legend()
-    plt.title(title)
-    plt.savefig(outfile, dpi=300, format="png", facecolor='w', edgecolor='w',
-                orientation='portrait', papertype=None, transparent=False)
-    plt.close() 
+    print(statement)
     
-@follows(runHomerFindMotifs, runHomerFindMotifsGenome, homerMotifEnrichmentPlot)
+    P.run()
+    
+    # #job_memory = "10G"
+    
+    # homerResults = pd.read_csv(infile, sep="\t", header=0)
+
+    # # limit no. motif to include in plot
+    # limit_motifs = 5
+    
+    # # get plot title
+    # title = infile.split("/")[-1]
+
+    # # select total counts for motifs in sequences
+    # motifs = homerResults[[x for x in homerResults.columns if "total" in x]]
+    # motifs.columns = [x.split(":")[-1].split("/")[0] for x in motifs.columns] # simplify motif names
+
+    # # get position information
+    # motifDist = homerResults.iloc[:, 0:1]
+    # motifDist.columns = ["dist_from_center"]
+
+    # # rejoin dfs
+    # processed_results = pd.concat([motifDist, motifs], axis=1)
+
+    # # melt data
+    # processed_results = processed_results.melt(id_vars=["dist_from_center"])
+    # processed_results.columns = ["dist_from_center", "motif", "motifs_per_bp_per_peak"]
+
+    # # set plot style
+    # matplotlib.style.use(["seaborn-ticks", "seaborn-deep", "seaborn-notebook"])
+    # palette = ["r", "g", "b", "c", "m", "y", "k", "w"]
+
+    # n = 0
+    # cols = {}
+    # for i in processed_results["motif"].unique():
+    #     n = n + 1
+
+    #     if limit_motifs:
+    #         if n > limit_motifs:
+    #             break
+
+    #     color = palette[n]
+    #     cols[i] = color
+
+    #     df = processed_results[processed_results["motif"] == i]
+
+    #     plt.plot(df["dist_from_center"], df["motifs_per_bp_per_peak"], label=''.join(df["motif"].unique()))
+
+    # plt.legend()
+    # plt.title(title)
+    # plt.savefig(outfile, dpi=300, format="png", facecolor='w', edgecolor='w',
+    #             orientation='portrait', papertype=None, transparent=False)
+    # plt.close() 
+    
+@follows(runHomerFindMotifs, runHomerFindMotifsGenome, annotatePeaks)
 def runHomerAnalysis():
     pass
 
@@ -628,7 +622,7 @@ def runHomerAnalysis():
 def runMotifAnalysis():
     pass
 
-@follows(runMotifAnalysis)
+#@follows(runMotifAnalysis)
 @files(None, "*.nbconvert.html")
 def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template(s)'''
@@ -637,7 +631,7 @@ def report(infile, outfile):
     templates = templates.split(",")
 
     if len(templates)==0:
-        print "Specify Jupyter ipynb template path in pipeline.ini for html report generation"
+        print("Specify Jupyter ipynb template path in pipeline.ini for html report generation")
         pass
 
     for template in templates:
@@ -650,11 +644,13 @@ def report(infile, outfile):
                    jupyter nbconvert 
                      --to notebook 
                      --allow-errors 
-                     --ExecutePreprocessor.timeout=360
+                     --ExecutePreprocessor.timeout=None
+                     --ExecutePreprocessor.kernel_name=python3
                      --execute %(infile)s; checkpoint ;
                    jupyter nbconvert 
                      --to html 
-                     --ExecutePreprocessor.timeout=360
+                     --ExecutePreprocessor.timeout=None
+                     --ExecutePreprocessor.kernel_name=python3
                      --execute %(nbconvert)s; checkpoint;
                    rm %(tmp)s'''
 
@@ -696,7 +692,7 @@ def runAme(infile,  outfile):
                  <( cat %(motifDb)s )
                  > %(outfile)s
               ''' % locals()
-    print statement
+    print(statement)
     P.run()
 
 
@@ -718,7 +714,7 @@ def filterTFDatabases(infile, outfile):
     
         statement = '''awk '/^MOTIF/ {p=0} /%(TF)s/ {p=1} p' <( cat %(TFdb)s ) >> %(outfile)s''' % locals()
 
-        print statement
+        print(statement)
         P.run()
 
 @transform(filterTFDatabases, suffix(".txt"), r".meme")
@@ -806,7 +802,7 @@ def HitList_table(infile, outfile):
     '''make table for csvdb'''
 
     statement = '''sed 's/\([-+]\)/\\1\\t/' %(infile)s | grep -v ^# | tr -s " " | sed 's/ /\\t/g' | sort -k6,6rn > %(outfile)s'''
-    print statement
+    print(statement)
     P.run()
 
 @transform(HitList_table, suffix(".txt"), r".load")
@@ -829,7 +825,7 @@ def mastHitList_results(infile, outfile):
             FROM  %(motif_id_table)s a, %(hit_list_table)s b, %(peak_info_table)s c 
             WHERE a.motif_no = b.motif_no AND b.sequence_name = c.peak_id''' % locals()
     
-    print query
+    print(query)
     
     dbh = sqlite3.connect(PARAMS["database"])
     cc = dbh.cursor()
@@ -876,7 +872,7 @@ def runFimo(infiles, outfile):
     bfile = sequences.replace(".foreground.fasta", ".background.bfile")
     outdir = outfile[:-len(".fimo.txt")]
 
-    # Parse-genomic-coord flag reports coords of sequences where available
+    # Parse-genomic-coord flag reportcoords of sequences where available
     
     statement = '''fimo
                    --bgfile %(bfile)s

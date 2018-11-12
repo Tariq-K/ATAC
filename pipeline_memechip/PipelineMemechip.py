@@ -57,7 +57,7 @@ Code
 #import pybedtools
 
 import math, glob  
-import rpy2.robjects as R
+#import rpy2.robjects as R
 import CGAT.Experiment as E
 import logging as L
 import sqlite3
@@ -600,7 +600,7 @@ def summariseGATRunsByAnnotation(infile, outfile):
     
     run_sets = glob.glob(gatDir+"/*")
 
-    print run_sets
+    print(run_sets)
                   
     gat_runs = {}
 
@@ -612,8 +612,8 @@ def summariseGATRunsByAnnotation(infile, outfile):
                "qvalue":"qval"}
 
     for counter_type in counterPatterns:
-        print ">>>>"
-        print counter_type
+        print(">>>>")
+        print(counter_type)
         counter_types.append(counter_type)
         gat_runs[counter_type] = {}
 
@@ -623,14 +623,14 @@ def summariseGATRunsByAnnotation(infile, outfile):
             #print dir_name_files
             for f in dir_name_files:
                 basedir, name, filename = f.split("/")
-                print filename
+                print(filename)
 
                 segments = filename.split(".tsv.gz")[0]
                 if name not in names: names.append(name)
                 if segments not in segments_names: segments_names.append(segments)
 
                 if filename.endswith(counter_type):
-                    print "boom"
+                    print("boom")
                     if name not in gat_runs[counter_type]: gat_runs[counter_type][name] = {}
                     gat_runs[counter_type][name][segments] =  gutted(f,columns.keys())
 

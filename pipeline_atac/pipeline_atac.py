@@ -119,28 +119,6 @@ PARAMS = P.getParameters(
      "../pipeline.ini",
      "pipeline.ini"])
 
-# add configuration values from associated pipelines
-#
-# 1. pipeline_annotations: any parameters will be added with the
-#    prefix "annotations_". The interface will be updated with
-#    "annotations_dir" to point to the absolute path names.
-PARAMS.update(P.peekParameters(
-    PARAMS["annotations_dir"],
-    "pipeline_annotations.py",
-    on_error_raise=__name__ == "__main__",
-    prefix="annotations_",
-    update_interface=True))
-
-
-# if necessary, update the PARAMS dictionary in any modules file.
-# e.g.:
-#
-# import CGATPipelines.PipelineGeneset as PipelineGeneset
-# PipelineGeneset.PARAMS = PARAMS
-#
-# Note that this is a hack and deprecated, better pass all
-# parameters that are needed by a function explicitely.
-
 # -----------------------------------------------
 # Utility functions
 def connect():
@@ -196,20 +174,20 @@ def writeGreat(locations,basalup,basaldown,maxext,outfile,half=False):
     genome = {}
     for location in locations:
         chrom, gstart, gend, strand_int, gid = location
-        if strand_int == -1: 
+        if strand_int == "-": 
             strand = "minus" 
             tss = gend
         else: 
             strand = "plus"
             tss = gstart
         record = [tss,strand,gid]
-        if chrom[3:5]=="NT" or chrom[0:2]=="MT": continue
+        if chrom[3:5]=="NT" or chrom[3:]=="M": continue
         if chrom not in genome: 
             genome[chrom] = [ record ]
         else: genome[chrom].append(record)
 
     #add the ends of the chromosomes
-    contigs = gzip.open(PARAMS["annotations_dir"]+"/assembly.dir/contigs.bed.gz","r")
+    contigs = gzip.open(PARAMS["annotations_dir"]+"/assembly.dir/contigs.bed.gz","rt")
 
     
     nmatched = 0
@@ -281,19 +259,20 @@ def writeGreat(locations,basalup,basaldown,maxext,outfile,half=False):
                     backext = min( maxext, backstop - l )
                 regend = l + backext
 
-            greatBed.append(["chr"+contig,str(regstart),str(regend),gid])
+            # greatBed.append(["chr"+contig,str(regstart),str(regend),gid])
+            greatBed.append([contig,str(regstart),str(regend),gid])
         
     outfh = open(outfile,"w")
     outfh.write("\n".join(["\t".join(x) for x in greatBed])+"\n")
     outfh.close()
 
-
-
+    
 def getTSS(start,end,strand):
     if strand == 1 or strand == "+": tss = start
     elif strand == -1 or strand == "-": tss = end
     else: raise ValueError("getTSS: stand specification not understood")
     return tss
+
 
 # ---------------------------------------------------
 # Specific pipeline tasks
@@ -305,7 +284,7 @@ Unpaired = isPaired(glob.glob("data.dir/*fastq*gz"))
 #####################################################
 ####                Mapping                      ####
 #####################################################
-@follows(connect, mkdir("bowtie2.dir"))
+@follows(mkdir("bowtie2.dir"))
 @transform("data.dir/*.fastq.1.gz",
            regex(r"data.dir/(.*).fastq.1.gz"),
            r"bowtie2.dir/\1.genome.bam")
@@ -341,7 +320,7 @@ def mapBowtie2_PE(infile, outfile):
                    samtools index %(outfile)s; checkpoint;
                    rm $tmp''' % locals()
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -378,7 +357,7 @@ def mapBowtie2_SE(infile, outfile):
                    samtools index %(outfile)s; checkpoint;
                    rm $tmp''' % locals()
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -403,7 +382,7 @@ def filterBam(infile, outfile):
                    samtools index %(outfile)s; checkpoint;
                    rm $tmp $head''' % locals()
 
-    print statement
+    print(statement)
 
     P.run()
     
@@ -434,7 +413,7 @@ def removeDuplicates(infile, outfile):
                    mv $tmp %(outfile)s; checkpoint ; 
                    samtools index %(outfile)s'''
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -467,7 +446,7 @@ def size_filterBam(infile, outfile):
                    rm $tmp $head''' % locals()
 
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -500,7 +479,7 @@ def contigReadCounts(infile, outfile):
                     awk 'BEGIN {OFS="\\t"} {print $0,"%(name)s"}' $tmp > %(outfile)s; checkpoint;
                     rm $tmp'''
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -527,7 +506,7 @@ def flagstatBam(infile, outfile):
 
     statement = '''samtools flagstat %(infile)s > %(outfile)s'''
 
-    print statement
+    print(statement)
     
     P.run()
 
@@ -598,7 +577,7 @@ def picardAlignmentSummary(infile, outfile):
                      O=$tmp; checkpoint ;
                    cat $tmp | grep -v "#" > %(outfile)s'''
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -624,7 +603,7 @@ def picardInsertSizes(infile, outfile):
 
     tmp_dir = "$SCRATCH_DIR"
     
-    job_threads = "3"
+    job_threads = "4"
     job_memory = "8G"
 
     pdf = outfile.replace("Metrics.txt", "Histogram.pdf")
@@ -640,7 +619,7 @@ def picardInsertSizes(infile, outfile):
                    cat $tmp | grep -A 2 "## METRICS CLASS" $tmp | grep -v "#" > %(outfile)s; checkpoint;
                    rm $tmp'''
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -715,7 +694,7 @@ def getFragmentSize(infile, outfile):
                    cat $tmp | tr -s " " "\\t" > %(outfile)s; checkpoint;
                    rm $tmp'''
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -778,7 +757,7 @@ def macs2callpeaks(infile, outfile):
                        --name %(name)s 
                        >& %(outfile)s'''  
 
-    print statement
+    print(statement)
     
     P.run()
 
@@ -819,7 +798,7 @@ def filterPeaks(infiles, outfile):
     
     statement = '''intersectBed -wa -v -a %(peak)s -b <(zcat %(blacklist)s ) > %(outfile)s'''
 
-    print statement
+    print(statement)
     
     P.run()
 
@@ -882,8 +861,8 @@ def mergeReplicatePeaks(infiles, outfile):
                 fields = [x.strip('"\n') for x in line.split("\t")]
 
                 # destructure list, assign items to variables
-                [chr1, start1, end1, peak_id1, peak_width1, strand1, fold_change1, pvalue1, qvalue1, summit1, 
-                chr2, start2, end2, peak_id2, peak_width2, strand2, fold_change2, pvalue2, qvalue2, summit2] = fields
+                [chr1, start1, end1, peak_id1, peak_score1, strand1, fold_change1, pvalue1, qvalue1, summit1, 
+                chr2, start2, end2, peak_id2, peak_score2, strand2, fold_change2, pvalue2, qvalue2, summit2] = fields
 
                 # merge columns between reps as appropriate
                 pos = [int(start1), int(end1), int(start2), int(end2)]
@@ -899,13 +878,14 @@ def mergeReplicatePeaks(infiles, outfile):
                 else:
                     strand = "."
 
+                peak_score = str(np.mean([int(peak_score1), int(peak_score2)]))
                 fold_change = str(np.mean([float(fold_change1), float(fold_change2)]))
                 pvalue = min(pvalue1, pvalue2)
                 qvalue = min(qvalue1, qvalue2)
                 summit = str(int(start) + int(np.mean([int(summit1), int(summit2)])))
                 
                 # output
-                bed = [chr1, start, end, peak_id, peak_width, strand, fold_change, pvalue, qvalue, summit]
+                bed = [chr1, start, end, peak_id, peak_score, strand, fold_change, pvalue, qvalue, summit]
                 bed = '\t'.join(bed) + '\n'
 
                 if n == 1:
@@ -1066,7 +1046,7 @@ def FRIPcountBAM(infiles, outfile):
                      && sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\ttotal' 
                      %(outfile)s''' % locals()
 
-    print statement
+    print(statement)
          
     P.run()
 
@@ -1168,7 +1148,7 @@ def mergePeaks(infiles, outfile):
                    awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,"merged_peaks_"NR,$5,$4,$3-$2,sprintf("%%i", ($2+$3)/2)}' - > %(outfile)s; checkpoint;
                    rm $tmp'''
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -1244,7 +1224,7 @@ def filterEnsPromoters(infile,outfile):
                 sed 's/chrchr/chr/' %(infile)s > $tmp &&
                 grep -v ^chrM $tmp > %(outfile)s && rm $tmp'''
 
-    print statement
+    print(statement)
     
     P.run()
 
@@ -1276,7 +1256,7 @@ def regulatedGenes(infiles,outfile):
 
     # Filter on nearest peak 2 gene later
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -1308,7 +1288,7 @@ def regulatedTables(infiles, outfile):
                      on g.gene_id = e.gene_id
                   ''' % (regulated, great, ensGenes)
 
-    print query
+    print(query)
     
     dbh = sqlite3.connect(PARAMS["database"])
     cc = dbh.cursor()
@@ -1352,7 +1332,7 @@ def regulatedTables(infiles, outfile):
                 && awk 'BEGIN {OFS="\\t"} {print $8,$9,$10,$1,$2,$3,$4,$5,$6,$7}' $tmp 
                 > %(outfile)s  && rm %(sql_table)s $tmp''' % locals()
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -1431,7 +1411,7 @@ def scoreIntervalsBAM(infiles, outfile):
                         sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\tpeak_center\\tgene_id\\ttotal' %(outfile)s; checkpoint;
                         rm $tmp''' % locals()
 
-    print statement
+    print(statement)
 
     P.run()
 
@@ -1548,7 +1528,7 @@ def bamCoverage(infile, outfile):
     # --minMappingQuality 10 optional argument, but unnecessary as bams are alredy filtered
     # centerReads option and small binsize should increase resolution around enriched areas
 
-    print statement
+    print(statement)
     
     P.run()
 
@@ -1579,7 +1559,7 @@ def bamCoverage(infile, outfile):
 #         statement = '''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > %(outfile)'''
 
 
-#     print statement
+#     print(statement)
     
 #     P.run()
 
@@ -1638,7 +1618,7 @@ def mappingPlots(infile, outfiles):
                                          TOTAL_READS, PCT_ADAPTER, sample_id from picardAlignmentSummary
                                          where CATEGORY = "PAIR" ''', db)
     if Unpaired==True:
-        print "Update function for non-paired data"
+        print("Update function for non-paired data")
 
     # Format mapping qc df
     reads["Filter"] = reads["sample_id"].apply(lambda x: x.split(".")[-1])
@@ -1647,7 +1627,7 @@ def mappingPlots(infile, outfiles):
     reads["sample_id"] = reads["sample_id"].apply(lambda x: x.split(".")[0])
 
     if len(sample_info)==0:
-        print "Provide sample_info df with sample annotations"
+        print("Provide sample_info df with sample annotations")
 
     reads = pd.merge(reads, sample_info, on="sample_id", how="inner")
 
@@ -1792,7 +1772,7 @@ def replicate_correlation(infile, outfiles):
     
     statement = '''select sample_id, peak_id, RPM_width_norm *1000 as RPM 
                    from all_norm_counts where size_filt == "%(size_filt)s" ''' % locals()
-    print statement
+    print(statement)
     
     def get_counts(statement):
         # get df, filter on fragment size
@@ -1970,7 +1950,7 @@ def TSSmatrix(infiles, outfiles):
                          --samplesLabel %(names)s
                          -out %(outfile)s'''
 
-        print statement
+        print(statement)
 
         P.run()
 
@@ -1999,7 +1979,7 @@ def TSSprofile(infiles, outfiles):
                            --yAxisLabel "ATAC signal (RPKM)"
                            -out %(outfile)s'''
 
-        print statement
+        print(statement)
         P.run()
 
     
@@ -2017,7 +1997,7 @@ def report(infile, outfile):
     templates = templates.split(",")
 
     if len(templates)==0:
-        print "Specify Jupyter ipynb template path in pipeline.ini for html report generation"
+        print("Specify Jupyter ipynb template path in pipeline.ini for html report generation")
         pass
 
     for template in templates:
