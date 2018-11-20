@@ -372,8 +372,24 @@ def loadMemeTomTomGenerator():
 @files(loadMemeTomTomGenerator)
 def loadMemeTomTom(infile, outfile):
     '''load meme tomtom results'''
-    P.load(infile, outfile, options='-H "query_id,target_id,optimal_offset,p_value,e_value,q_value,overlap,query_consensus,targe_consensus,orientation" ')
 
+    ### loading this many tables on kgen1 is too intensive
+    ### to_cluster = False is hardcoded in P.load()
+    ### call Database.build_load_statement and submit to cluster here
+
+    tablename = os.path.basename(outfile).replace(".load", "").replace(".", "_")
+    options='-H "query_id,target_id,optimal_offset,p_value,e_value,q_value,overlap,query_consensus,targe_consensus,orientation" '
+    statement = '''cat %(infile)s | ''' + P.build_load_statement(tablename, options=options, retry=True) + ''' > %(outfile)s'''
+
+    print(statement)
+    
+    to_cluster = True
+
+    P.run() # if this works update the rest of pipeline accordingly
+    
+    #P.load(infile, outfile, options='-H "query_id,target_id,optimal_offset,p_value,e_value,q_value,overlap,query_consensus,targe_consensus,orientation" ')
+
+    
 def loadDremeTomTomGenerator():
 
     meme_tomtom = glob.glob("meme.chip.dir/*memechip")
@@ -398,8 +414,17 @@ def loadDremeTomTomGenerator():
 @files(loadDremeTomTomGenerator)
 def loadDremeTomTom(infile, outfile):
     '''load dreme tomtom results'''
+
+    to_cluster = True
+
+    tablename = os.path.basename(outfile).replace(".load", "").replace(".", "_")
+    options='-H "query_id,target_id,optimal_offset,p_value,e_value,q_value,overlap,query_consensus,targe_consensus,orientation" '
+
+    statement = '''cat %(infile)s | ''' + P.build_load_statement(tablename, options=options, retry=True) + ''' > %(outfile)s'''
     
-    P.load(infile, outfile, options='-H "query_id,target_id,optimal_offset,p_value,e_value,q_value,overlap,query_consensus,targe_consensus,orientation" ')
+    P.run()
+    
+    #P.load(infile, outfile, options='-H "query_id,target_id,optimal_offset,p_value,e_value,q_value,overlap,query_consensus,targe_consensus,orientation" ')
 
 def summarizeFimoGenerator():
 
@@ -461,9 +486,18 @@ def summarizeFimo(infiles, outfile):
     
 @transform(summarizeFimo, suffix(".txt"), ".load")
 def loadFimo(infile, outfile):
+    
+    to_cluster = True
 
-    P.load(infile, outfile,
-           options='-H "pattern_name,sequence_name,start,stop,strand,score,p_value,q_value,matched_sequence" ')
+    tablename = os.path.basename(outfile).replace(".load", "").replace(".", "_")
+    options='-H "pattern_name,sequence_name,start,stop,strand,score,p_value,q_value,matched_sequence" '
+
+    statement = '''cat %(infile)s | ''' + P.build_load_statement(tablename, options=options, retry=True) + ''' > %(outfile)s'''
+    
+    P.run()
+
+    # P.load(infile, outfile,
+    #        options='-H "pattern_name,sequence_name,start,stop,strand,score,p_value,q_value,matched_sequence" ')
     
 @follows(runMemeChIP, loadMemeTomTom, loadDremeTomTom, loadFimo)
 def runMemeAnalysis():
