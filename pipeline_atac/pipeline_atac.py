@@ -1712,29 +1712,29 @@ def coverage():
 ########################################################
 ####                    QC Plots                    ####
 ########################################################
-@follows(coverage, mkdir("QC_plots"))
-@files("data.dir/*.fastq.*.gz", "sample_info.txt")
-def getSampleInfo(infiles, outfile):
-    '''Generate lookup table of sample info based on filenames.
-       Filenames should be of format: 
-       (category)_(condition)_(stimulus)_(replicate).fastq.*.gz'''
+# @follows(coverage, mkdir("QC_plots"))
+# @files("data.dir/*.fastq.*.gz", "sample_info.txt")
+# def getSampleInfo(infiles, outfile):
+#     '''Generate lookup table of sample info based on filenames.
+#        Filenames should be of format: 
+#        (category)_(condition)_(stimulus)_(replicate).fastq.*.gz'''
 
-    infiles = [os.path.basename(x).split(".")[0] for x in infiles]
-    infiles = list(set(infiles)) # remove dups
+#     infiles = [os.path.basename(x).split(".")[0] for x in infiles]
+#     infiles = list(set(infiles)) # remove dups
     
-    df = pd.DataFrame(infiles, columns=["sample_id"])
-    df["category"] = df["sample_id"].apply(lambda x: x.split("_")[0])
-    df["condition"] = df["sample_id"].apply(lambda x: x.split("_")[1])
-    df["stimuli"] = df["sample_id"].apply(lambda x: x.split("_")[2])
-    df["replicate"] = df["sample_id"].apply(lambda x: x.split("_")[3])
-    df["sample_group"] = df.apply(lambda x: str('_'.join([x.category, x.condition, x.stimuli])), axis=1)
+#     df = pd.DataFrame(infiles, columns=["sample_id"])
+#     df["category"] = df["sample_id"].apply(lambda x: x.split("_")[0])
+#     df["condition"] = df["sample_id"].apply(lambda x: x.split("_")[1])
+#     df["stimuli"] = df["sample_id"].apply(lambda x: x.split("_")[2])
+#     df["replicate"] = df["sample_id"].apply(lambda x: x.split("_")[3])
+#     df["sample_group"] = df.apply(lambda x: str('_'.join([x.category, x.condition, x.stimuli])), axis=1)
     
-    df.to_csv(outfile, sep="\t", header=True, index=False)
+#     df.to_csv(outfile, sep="\t", header=True, index=False)
 
     
-@transform(getSampleInfo, suffix(".txt"), ".load")
-def loadgetSampleInfo(infile, outfile):
-    P.load(infile, outfile, options='-i "sample_id" ')
+# @transform(getSampleInfo, suffix(".txt"), ".load")
+# def loadgetSampleInfo(infile, outfile):
+#     P.load(infile, outfile, options='-i "sample_id" ')
 
 
 # @follows(loadgetSampleInfo)
@@ -2156,7 +2156,7 @@ def TSSheatmap(infiles, outfiles):
         print(statement)
         P.run()
     
-@follows(TSSprofile)
+@follows(TSSprofile, TSSheatmap)
 def TSSplot():
     pass        
 
@@ -2196,7 +2196,7 @@ def report(infile, outfile):
 
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(mapping, peakcalling, coverage, frip, count, TSSplot, report)
+@follows(mapping, peakcalling, coverage, frip, count, TSSplot)
 def full():
     pass
 
