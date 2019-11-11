@@ -48,8 +48,8 @@ See :ref:`PipelineSettingUp` and :ref:`PipelineRunning` on general
 information how to use CGAT pipelines.
 
 - Use the target "runMotifAnalysis" for motif discovery and report generation
-- Motifs of intereset can then be speciifed in pipeline.ini and make "full" target
-  to run MAST on input peaks
+- Motifs of interest can then be speciifed in pipeline.ini and make "runMastAnalysis" target
+  to run MAST on input peaks (or "full" target to run both tasks)
 - Aternatively, if motif analysis was run elsewhere, MAST can be run on its own 
   to search for defined motif in new peaks etc.
 
@@ -161,8 +161,12 @@ def peakSummit(infile, outfile):
     if os.path.isfile(infile):
         df = pd.read_csv(infile, sep="\t", header=None)
 
-        df = df.iloc[:, 0:6] # subset on useful columns
-        df.columns = ["contig", "start", "end", "peak_id", "score", "summit"]
+        if len(list(df))==5: # add summit column if missing
+            df.columns = ["contig", "start", "end", "peak_id", "score"]
+            df["summit"] = df["summit"] = df.apply(lambda x: int(x.start+((x.end-x.start)/2)), axis=1)
+        else:
+            df = df.iloc[:, 0:6] # subset on useful columns
+            df.columns = ["contig", "start", "end", "peak_id", "score", "summit"]
 
         df = df.sort_values("score", ascending=False) # sort by score
 
@@ -260,7 +264,8 @@ def getMemeBfiles(infile, outfile):
     P.run()
                
 @follows(getMemeSequences, getMemeBfiles, mkdir("meme.chip.dir"))
-@transform(getMemeSequences,
+#@transform(getMemeSequences,
+@transform("meme.seq.dir/*.foreground.fasta",
            regex(r"meme.seq.dir/(.*).foreground.fasta"),
            r"meme.chip.dir/\1.memechip")
 def runMemeChIP(infile, outfile):
@@ -320,8 +325,13 @@ def runMemeChIP(infile, outfile):
     mode = PARAMS["memechip_mode"]
 
     job_memory = "5G"
+
+    # load python 2.7 venv as tomtom does not run in python3
+    # python3 version of tomtom does exist but isn't called by meme-chip
+    vpy2 = '''module unload apps/python3/3.6.2 && module switch apps/R/3.5.0 apps/R/3.4.2 && source /gfs/devel/tkhoyratty/python-2.7.13/bin/activate && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/gfs/apps/apps/python-2.7.13/lib/'''
     
-    statement = '''meme-chip
+    statement = '''%(vpy2)s; checkpoint;
+                   meme-chip
                    -oc %(outdir)s
                    -db %(motifDb)s
                    -bfile %(bfile)s
@@ -499,7 +509,9 @@ def runMemeAnalysis():
 ################################################
 #####        Find motifs with HOMER        #####
 ################################################
-@follows(runMemeAnalysis, mkdir("homer.chip.dir"))
+#@follows(runMemeAnalysis, mkdir("homer.chip.dir"))
+@follows(mkdir("homer.chip.dir"))
+
 @transform("meme.seq.dir/*.foreground.fasta",
            regex(r"meme.seq.dir/(.*).foreground.fasta"),
            r"homer.chip.dir/\1.homer.log")
@@ -533,7 +545,7 @@ def runHomerFindMotifsGenome(infile, outfile):
 
     tmp_dir = "$SCRATCH_DIR"
     outdir = outfile.replace(".homer.log", "")
-    
+   
     statement = '''peaks=`mktemp -p %(tmp_dir)s`; checkpoint;
                   awk 'BEGIN {OFS="\\t"} {print $0,0}' %(infile)s > $peaks; checkpoint; 
                   findMotifsGenome.pl 
@@ -541,13 +553,13 @@ def runHomerFindMotifsGenome(infile, outfile):
                     mm10
                     %(outdir)s
                     -h
-                    -size 200
+                    -size given
                     &> %(outfile)s; checkpoint;
                   rm $peaks'''
     
     P.run()
 
-@follows(runHomerFindMotifs, mkdir("motifsCoverage.dir"))
+@follows(runHomerFindMotifsGenome, mkdir("motifsCoverage.dir"))
 @transform("meme.seq.dir/*.foreground.bed",
            regex(r"meme.seq.dir/(.*).foreground.bed"),
            r"motifsCoverage.dir/\1.motifCoverage.txt")
@@ -563,7 +575,7 @@ def annotatePeaks(infile, outfile):
     # motifs = "homer.chip.dir/" + run + "/homerResults/motif[1-6].motif"
 
     # search for all discovered motifs
-    motifs = "homer.chip.dir/" + run + "/homerResults/motif*.motif"
+    motifs = "homer.genome.dir/" + run + "/homerResults/motif*.motif"
     
     statement = '''annotatePeaks.pl 
                      %(peak_file)s
@@ -574,7 +586,7 @@ def annotatePeaks(infile, outfile):
                      > %(outfile)s'''
     P.run()
                   
-@transform(annotatePeaks,
+@transform("motifsCoverage.dir/*.motifCoverage.txt",
             regex(r"(.*).motifCoverage.txt"),
             r"\1.motifEnrichment.png")
 # @transform("test.dir/*txt",
@@ -786,7 +798,6 @@ def addMemeMotifHeader(infile, outfile):
 def getInputPeakSequences(infile, outfile):
     '''Convert input bed files (all peaks) to fasta sequences for motif searching with MAST & FIMO'''
 
-    tmp_dir = "$SCRATCH_DIR"
     genome_fasta = os.path.join(PARAMS["genome_dir"],PARAMS["genome"]+".fasta")
 
     statement = '''fastaFromBed -name -fi %(genome_fasta)s -bed %(infile)s -fo %(outfile)s'''
@@ -795,7 +806,36 @@ def getInputPeakSequences(infile, outfile):
 
     P.run()
 
-@follows(getInputPeakSequences)
+@active_if(PARAMS["mast_background"])
+@transform("data.dir/*.peaks.bed",
+           regex(r"data.dir/(.*).peaks.bed"),
+           r"meme.seq.dir/\1.input_background.fasta")
+def getInputPeakBackgroundFASTA(infile, outfile):
+    '''get bed file of peak flanking regions (of equal width to peak) for meme background model'''
+
+    genome_idx = os.path.join(PARAMS["annotations_mm10dir"],"assembly.dir/contigs.tsv")
+    genome_fasta = os.path.join(PARAMS["genome_dir"],PARAMS["genome"]+".fasta")
+    tmp_dir = "$SCRATCH_DIR"
+    
+    statement ='''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+                  sort -k1,1 -k2,2n %(infile)s 
+                    | bedtools flank -pct -l 1 -r 1 -g %(genome_idx)s > $tmp; checkpoint;
+                  fastaFromBed -name -fi %(genome_fasta)s -bed $tmp -fo %(outfile)s; checkpoint;
+                  rm $tmp'''
+    
+    P.run()
+    
+@active_if(PARAMS["mast_background"])
+@transform(getInputPeakBackgroundFASTA, suffix(".fasta"), ".bfile")
+def getInputPeakBackgroundModel(infile, outfile):
+    '''prepare the meme background model'''
+
+    statement='''fasta-get-markov -m 2 %(infile)s  > %(outfile)s''' % locals()
+
+    P.run()
+
+    
+@follows(getInputPeakSequences, getInputPeakBackgroundModel)
 @transform("meme.seq.dir/*.input_sequences.fasta",
            regex(r"meme.seq.dir/(.*).input_sequences.fasta"),
            add_inputs(["query_motifs.dir/*.meme"]),
@@ -808,10 +848,13 @@ def runMast(infiles, outfile):
     
     sequences, motifs = infiles
 
-### removed custom bfile. default is to use base frequencies in motif as background
-#    bfile = sequences.replace(".foreground.fasta", ".background.bfile")
-#                          -bfile %(bfile)s
- 
+    background = PARAMS["mast_background"]
+    if background == "custom":
+        bfile = sequences.replace(".input_sequences.fasta", ".input_background.bfile")
+        b_opt = '''-bfile %(bfile)s''' % locals()
+    else:
+        b_opt = ''' '''
+        
     for motif in motifs:
 
         if len(motif) > 0:
@@ -820,6 +863,7 @@ def runMast(infiles, outfile):
 
             statement = '''mast 
                            -w              
+                           %(b_opt)s
                            -oc %(outdir)s
                            <(cat %(motif)s )
                            %(sequences)s
@@ -837,7 +881,20 @@ def runMast(infiles, outfile):
 def loadPeaks(infile, outfile):
     '''Load input peaks to merge w/ MAST results by peak_id'''
 
-    P.load(infile, outfile, options=' -H "contig,start,end,peak_id,score" ')
+    #P.load(infile, outfile, options=' -H "contig,start,end,peak_id,score" ')
+    # make sure peak file is 5 columns
+    
+    tablename = os.path.basename(outfile).replace(".load", "").replace(".", "_")
+    options='-H "contig,start,end,peak_id,score" '
+    
+    statement = '''cat %(infile)s | cut -f1-5 - |'''
+    statement = statement + P.build_load_statement(tablename, options=options, retry=True)
+    statement = statement + ''' > %(outfile)s'''
+    
+    to_cluster = True
+
+    P.run()
+
     
 @follows(loadPeaks, mkdir("query_motifs.dir/mast.beds.dir/"))
 @transform("query_motifs.dir/mast.results.dir/*/mast.txt",
@@ -895,10 +952,14 @@ def runMast_HitList(infiles, outfile):
     job_memory = "5G"
     
     sequences, motifs = infiles
-    
-#    bfile = sequences.replace(".foreground.fasta", ".background.bfile")
-#                      -bfile %(bfile)s
- 
+
+    background = PARAMS["mast_background"]
+    if background == "custom":
+        bfile = sequences.replace(".input_sequences.fasta", ".input_background.bfile")
+        b_opt = '''-bfile %(bfile)s''' % locals()
+    else:
+        b_opt = ''' '''
+         
     for motif in motifs:
         
         suffix = os.path.basename(motif).replace(".meme", "") 
@@ -908,6 +969,7 @@ def runMast_HitList(infiles, outfile):
         statement = '''mast 
                        -hit_list
                        -best
+                       %(b_opt)s
                        -w              
                        -oc %(outdir)s
                        <(cat %(motif)s )
@@ -955,7 +1017,13 @@ def HitList_table(infile, outfile):
                              sed 's/\([+-]\)\([0-9]\)/\\1\\t\\2/' ''')
         
         if "denovo" in infile:
-            meme_out, motif_no, motif_name = PARAMS["mast_meme_motif"].split(",")
+#            meme_out, motif_no, motif_name = PARAMS["mast_meme_motif"].split(",")
+
+            ### check what needs to be specified here - it should not be necessary
+            ### as motif files can be added into data.dir/ and should be named accordingly
+            
+            motif_name = PARAMS["mast_meme_motif"].split(",")
+
             cmd_suffix = ''' sed 's/\(\\t1\\t\)/\\t%(motif_name)s\\t/' ''' % locals()
             statement.append(cmd_suffix)
             
@@ -1041,7 +1109,7 @@ def mastHitList_results(infiles, outfile):
 
     for m in mast_motifs:
         out_dir = "query_motifs.dir/mast.beds.dir/"
-        filename = out_dir + '.'.join([bedfile, m]) + "MASThitList.bed"
+        filename = out_dir + '.'.join([bedfile, m]) + ".MASThitList.bed"
         df = res[res["motif_name"] == m]
         df.to_csv(filename, header=False, index=None, sep="\t")
 
