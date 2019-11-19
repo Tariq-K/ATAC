@@ -47,6 +47,16 @@
 #    - QC, mapping, peakcalling, signal:background
 #    - reports, data exploration and differential accessibility
 
+# Requirements
+#    - cgat-core, cgat-flow (https://github.com/cgat-developers)
+#    - Bowtie2
+#    - Macs2
+#    - PicardTools
+#    - deepTools
+#    - BedTools
+#    - samtools
+#    - 
+
 ######################################################
 
 from ruffus import *

@@ -98,22 +98,30 @@ import matplotlib
 from matplotlib import pyplot as plt
 import seaborn as sns
 
-
-# load options from the config file
-PARAMS = P.getParameters(
-    ["%s/pipeline.ini" % os.path.splitext(__file__)[0],
-     "../pipeline.ini",
-     "pipeline.ini"])
-
 # -----------------------------------------------
-# Utility functions
+
+PARAMS = P.PARAMS
+
+db = PARAMS['database']['url'].split('./')[1]
 
 def connect():
-    '''
-    Setup a connection to an sqlite database
+    '''connect to database.
+    This method also attaches to helper databases.
     '''
 
-    dbh = sqlite3.connect(PARAMS['database'])
+    dbh = sqlite3.connect(db)
+
+    if not os.path.exists(PARAMS["annotations_database"]):
+        raise ValueError(
+                     "can't find database '%s'" %
+                     PARAMS["annotations_database"])
+
+    statement = '''ATTACH DATABASE '%s' as annotations''' % \
+    (PARAMS["annotations_database"])
+
+    cc = dbh.cursor()
+    cc.execute(statement)
+    cc.close()
 
     return dbh
 
@@ -121,7 +129,7 @@ def connect():
 ################################################
 #####              Meme-ChIP               #####
 ################################################
-#@follows(connect)
+@follows(connect)
 @transform("data.dir/*.peaks.bed",
            regex(r"(.*).peaks.bed"),
            r"\1.meme.bed")
@@ -149,7 +157,8 @@ def peakSummit(infile, outfile):
         df = df[["contig", "summit_start", "summit_end", "peak_id", "score"]]
 
         df.to_csv(outfile, sep="\t", header=None, index=None)
-            
+
+        
 def getMemeForegroundBedGenerator():
     
     beds = glob.glob("data.dir/*.meme.bed")
@@ -171,6 +180,7 @@ def getMemeForegroundBedGenerator():
                 
                 yield [ bed, outfile ]
 
+                
 @follows(peakSummit, mkdir("meme.seq.dir/"))
 @files(getMemeForegroundBedGenerator)
 def getMemeForegroundBed(infile, outfile):
@@ -193,12 +203,7 @@ def getMemeForegroundBed(infile, outfile):
    
     P.run()
 
-### This task in unnecessary, load inpud beds later to merge w/  MAST results -> rank peaks by motifs
-# @transform(getMemeForegroundBed, suffix(".bed"), r".load")
-# def loadMemeForegroundBed(infile, outfile):
-#     P.load(infile, outfile, options='-H "contig,start,end,peak_id,TFscore" ')
     
-# @follows(loadMemeForegroundBed)
 @transform(getMemeForegroundBed,
            regex(r"(.*).foreground.bed"),
            r"\1.background.bed")
@@ -213,6 +218,7 @@ def getMemeBackgroundBed(infile, outfile):
     
     P.run()
 
+    
 @follows(getMemeBackgroundBed)
 @transform("meme.seq.dir/*.bed",
            regex(r"(.*).bed"),
@@ -227,6 +233,7 @@ def getMemeSequences(infile, outfile):
     
     P.run()
 
+    
 @follows(getMemeSequences)
 @transform("meme.seq.dir/*background.fasta", suffix(".fasta"), ".bfile")
 def getMemeBfiles(infile, outfile):
@@ -235,9 +242,9 @@ def getMemeBfiles(infile, outfile):
     statement='''fasta-get-markov -m 2 %(infile)s  > %(outfile)s''' % locals()
 
     P.run()
-               
+
+    
 @follows(getMemeSequences, getMemeBfiles, mkdir("meme.chip.dir"))
-#@transform(getMemeSequences,
 @transform("meme.seq.dir/*.foreground.fasta",
            regex(r"meme.seq.dir/(.*).foreground.fasta"),
            r"meme.chip.dir/\1.memechip")
@@ -245,7 +252,7 @@ def runMemeChIP(infile, outfile):
     '''run MemeChIP'''
 
     outdir = outfile.replace(".memechip", "")
-    bfile= infile.replace(".foreground.fasta", ".background.bfile")
+    bfile = infile.replace(".foreground.fasta", ".background.bfile")
 
     motifDb =  " -db ".join(P.asList(PARAMS["memechip_motif_db"])) # Meme-Chip needs eac db in list to have "-db" flag
 
@@ -261,7 +268,6 @@ def runMemeChIP(infile, outfile):
             # specified in pipeline.ini
             
     nmeme_list = PARAMS["memechip_npeaks"].split(",")
-    print(nmeme_list)
     
     if "all" in nmeme_list: # get max file length if assessing all peaks
         meme_beds = glob.glob("data.dir/*.meme.bed")
@@ -299,10 +305,6 @@ def runMemeChIP(infile, outfile):
 
     job_memory = "5G"
 
-    # load python 2.7 venv as tomtom does not run in python3
-    # python3 version of tomtom does exist but isn't called by meme-chip
-    vpy2 = '''module unload apps/python3/3.6.2 && module switch apps/R/3.5.0 apps/R/3.4.2 && source /gfs/devel/tkhoyratty/python-2.7.13/bin/activate && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/gfs/apps/apps/python-2.7.13/lib/'''
-    
     statement = '''%(vpy2)s; checkpoint;
                    meme-chip
                    -oc %(outdir)s
