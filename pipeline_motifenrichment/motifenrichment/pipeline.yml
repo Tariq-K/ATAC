@@ -1,0 +1,58 @@
+###----
+
+pipeline_dir: ~/devel/my_scripts/ATAC_git/pipeline_motifenrichment/
+
+# the genome to use (UCSC convention)
+genome: mm10
+genome_dir: /gfs/mirror/genomes/plain/
+
+annotations:
+    # annotations database
+    database: /gfs/mirror/annotations/mm10_ensembl88/csvdb
+
+    # directory with annotation information
+    dir: /gfs/mirror/annotations/mm10_ensembl88/
+
+    # chrom sizes file (chromosome, size)
+    chrom_sizes: /gfs/mirror/annotations/mm10_ensembl88/assembly.dir/contigs.tsv
+
+
+fimo:
+    # Specify TFs for mast to search for, must be caps! Will match all Db hits for TF
+    motifs: 
+
+    # list of TF Db's
+    motif_db: /gfs/mirror/TRANSFAC/dat/meme/transfac.meme
+
+    mask: none
+
+    # Background
+    # Default is to generate 0-order Markov model from peak flanking regions = "local"
+    # Other option is to use background frequencies from motif file = "motif-file"
+    # or for meme inbuilt background leave blank
+    background: local
+
+    # Search sequences.
+    # By defualt peaks will be offset to peak centre
+    # If peak summits are in column 6 of BED file specify
+    # "True" here to use for peak centering
+    summits: False
+
+    # Window
+    #centered over peak) to search for motifs (in b.p.)
+    window: 1000
+    plot_window: 490
+    bins: 30
+
+    # normalisation method:
+    # "motif/peak" (default)
+    # or "motif/bp/peak" (as in HOMER)
+    norm: motif/peak
+
+    # Fimo pvalue thresh for sequence matches
+    # (default 1e-4)
+    pvalue: 1e-4
+
+    # FIMO FDR threshold for motif BEDs
+    qvalue: 0.1
+

@@ -77,54 +77,39 @@ from ruffus import *
 import sys
 import os
 import sqlite3
-import CGAT.Experiment as E
-import CGATPipelines.Pipeline as P
+import cgatcore.experiment as E
+from cgatcore import pipeline as P
 import glob
-import CGAT.Database as DB
 import pandas as pd
+import PipelineMotifenrichment as M
 
-# load options from the config file
-PARAMS = P.getParameters(
-    ["%s/pipeline.ini" % os.path.splitext(__file__)[0],
-     "../pipeline.ini",
-     "pipeline.ini"])
+# Pipeline configuration
+P.get_parameters(
+		 ["%s/pipeline.yml" % os.path.splitext(__file__)[0],
+		  "../pipeline.yml",
+		  "pipeline.yml"],
+		 )
 
-# add configuration values from associated pipelines
-#
-# 1. pipeline_annotations: any parameters will be added with the
-#    prefix "annotations_". The interface will be updated with
-#    "annotations_dir" to point to the absolute path names.
-PARAMS.update(P.peekParameters(
-    PARAMS["annotations_dir"],
-    "pipeline_genesets.py",
-    on_error_raise=__name__ == "__main__",
-    prefix="annotations_",
-    update_interface=True))
+PARAMS = P.PARAMS
 
+db = PARAMS['database']['url'].split('./')[1]
+print(db)
 
-# if necessary, update the PARAMS dictionary in any modules file.
-# e.g.:
-#
-# import CGATPipelines.PipelineGeneset as PipelineGeneset
-# PipelineGeneset.PARAMS = PARAMS
-#
-# Note that this is a hack and deprecated, better pass all
-# parameters that are needed by a function explicitely.
-
-# -----------------------------------------------
-# Utility functions
 def connect():
-    '''utility function to connect to database.
-
-    Use this method to connect to the pipeline database.
-    Additional databases can be attached here as well.
-
-    Returns an sqlite3 database handle.
+    '''connect to database.
+    This method also attaches to helper databases.
     '''
 
-    dbh = sqlite3.connect(PARAMS["database_name"])
-    statement = '''ATTACH DATABASE '%s' as annotations''' % (
-        PARAMS["annotations_database"])
+    dbh = sqlite3.connect(db)
+
+    if not os.path.exists(PARAMS["annotations_database"]):
+        raise ValueError(
+                     "can't find database '%s'" %
+                     PARAMS["annotations_database"])
+
+    statement = '''ATTACH DATABASE '%s' as annotations''' % \
+    (PARAMS["annotations_database"])
+
     cc = dbh.cursor()
     cc.execute(statement)
     cc.close()
@@ -152,7 +137,7 @@ def offsetPeaks(infile, outfile):
     chrom_sizes = PARAMS["annotations_chrom_sizes"]
     tmp_dir = "$SCRATCH_DIR"
 
-    statement_start ='''tmp=`mktemp -p %(tmp_dir)s`; checkpoint; 
+    statement_start ='''tmp=`mktemp -p %(tmp_dir)s` && 
                         awk 'BEGIN {OFS="\\t"}'''
     
     if summits == "True":
@@ -162,7 +147,7 @@ def offsetPeaks(infile, outfile):
 
     statement_end = '''{print $1,int(start),int(end),$4}'
                          %(infile)s
-                         > $tmp ; checkpoint;
+                         > $tmp &&
                        slopBed
                          -g %(chrom_sizes)s
                          -b %(offset)s
@@ -171,7 +156,7 @@ def offsetPeaks(infile, outfile):
     
     statement = ''.join([statement_start, opts, statement_end])
 
-    P.run()
+    P.run(statement)
 
 
 @transform(offsetPeaks,
@@ -206,7 +191,7 @@ def getMemeBackgroundBed(infile, outfile):
                     -g %(genome_idx)s 
                     > %(outfile)s'''
 
-    P.run()
+    P.run(statement)
 
     
 @follows(getMemeBackgroundBed)
@@ -226,7 +211,7 @@ def getMemeSequences(infile, outfile):
                      -bed %(infile)s 
                      -fo %(outfile)s'''
 
-    P.run()
+    P.run(statement)
 
 
 @follows(getMemeSequences)
@@ -241,7 +226,7 @@ def getMemeBfiles(infile, outfile):
                    %(infile)s  
                    > %(outfile)s'''
     
-    P.run()
+    P.run(statement)
 
     
 @follows(getMemeBfiles)
@@ -269,7 +254,7 @@ def filterTFDatabases(infile, outfile):
                          <( cat %(TFdb)s ) 
                          >> %(outfile)s''' 
 
-        P.run()
+        P.run(statement)
 
 
 @transform(filterTFDatabases,
@@ -281,13 +266,13 @@ def addMemeMotifHeader(infile, outfile):
     TFdb = PARAMS["fimo_motif_db"].split(",")[0]
     tmp_dir = "$SCRATCH_DIR"
          
-    statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
                    head -n9 %(TFdb)s | 
                    cat - %(infile)s 
-                     > $tmp ; checkpoint ;
+                     > $tmp && 
                    mv $tmp %(outfile)s'''
 
-    P.run()
+    P.run(statement)
 
 
 @transform(filterTFDatabases,
@@ -302,7 +287,7 @@ def getMotifIDs(infile, outfile):
     filename = outfile.replace(".load", ".txt")
     options='-H "pattern_name,TF" '
    
-    statement1 = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+    statement1 = '''tmp=`mktemp -p %(tmp_dir)s` &&
                    grep "^MOTIF" %(infile)s | 
                    sed 's/MOTIF //' |
                    sed 's/(//' |
@@ -313,21 +298,21 @@ def getMotifIDs(infile, outfile):
                    sed 's/://' |
                    sed 's/_//' |
                    tr -s "[[:blank:]]" "\\t" 
-                   > $tmp; checkpoint; 
+                   > $tmp && 
                    cat $tmp | '''
 
     # use sed to remove problematic chars e.g. ".", "(" etc. from motif names
     
     statement2 = P.build_load_statement(tablename, options=options, retry=True)
     
-    statement3 = ''' > %(outfile)s; checkpoint;
+    statement3 = ''' > %(outfile)s &&
                      mv $tmp %(filename)s'''
 
     statement = ''.join([statement1, statement2, statement3])
     
     to_cluster = True
 
-    P.run()
+    P.run(statement)
 
         
 @follows(getMotifIDs)
@@ -340,7 +325,7 @@ def symlinkCustomMotifs(infile, outfile):
 
     statement = '''ln -sfn ../%(infile)s %(outfile)s'''
 
-    P.run()
+    P.run(statement)
 
 
 @follows(symlinkCustomMotifs, addMemeMotifHeader, mkdir("query_motifs.dir/motif_logos"))
@@ -366,7 +351,7 @@ def motifLogos(infiles, outfiles):
                                       -t $i 
                                       -f PNG
                                       -o $o ; 
-                           done ; checkpoint; 
+                           done  && 
                            mv *png %(outdir)s'''
 
         # or plot first motif in file for cutom motifs (should only be 1 motif/file)
@@ -383,7 +368,7 @@ def motifLogos(infiles, outfiles):
 
         print(statement)
 
-        P.run()
+        P.run(statement)
     
 
 @follows(addMemeMotifHeader, getMotifIDs, symlinkCustomMotifs, motifLogos)
@@ -462,7 +447,7 @@ def fimo(infiles, outfile):
                    %(sequences)s
                    &> %(outfile)s ''' 
 
-    P.run()
+    P.run(statement)
 
 
 @transform(fimo,
@@ -471,7 +456,7 @@ def fimo(infiles, outfile):
 def loadFimo(infile, outfile):
     '''load fimo results from tsv'''
 
-    job_memory = "4G"
+#    job_memory = "4G"
     fimo_result = infile.replace(".fimo.log", "/fimo.txt")
 
     # escape clause if fimo fails to find motifs
@@ -488,7 +473,7 @@ def loadFimo(infile, outfile):
 
         to_cluster = True
 
-    P.run()
+    P.run(statement, job_memory="4G")
     
 
 @follows(loadFimo)
@@ -500,9 +485,10 @@ def fimoBed(infile, outfiles):
        by p-value. All motif matches past threshold 
        are exported to bed and results files'''
 
-    job_memory = "6G"
+#    job_memory = "6G"
     script = PARAMS["pipeline_dir"] + "fimoBED.py"
-    db = PARAMS["database"]
+    #db = PARAMS["database"]
+    db = PARAMS['database']['url'].split('./')[1]
     outfiles = ','.join(outfiles)
     
     statement = '''python %(script)s
@@ -512,7 +498,7 @@ def fimoBed(infile, outfiles):
 
     print(statement)
     
-    P.run()
+    P.run(statement, job_memory="6G")
 
 
 @follows(fimoBed)
@@ -567,68 +553,109 @@ def coverageBedGenerator():
                                   
 
 # it would be more space efficient to merge these 2 tasks and delete intermediate files
+
+# @follows(runFIMO, mkdir("motif.coverage.dir"))
+# @files(coverageBedGenerator)
+# def coverageBed(infiles, outfile):
+#     '''Calculate per base coverage of peaks by motif files'''
+
+#     bed, motif = infiles
+
+#     statement = '''coverageBed 
+#                      -d 
+#                      -a %(bed)s                      
+#                      -b %(motif)s 
+#                    | gzip - > %(outfile)s '''
+
+#     print(statement)
+
+#     P.run(statement)
+    
+
+# @transform(coverageBed,
+#            regex(r"(.*).bed.gz"),
+#            r"\1.bed.prep.gz")
+# def prepareBeds(infile, outfile):
+#     '''Prepare BEDs for plotting'''
+
+#     # This used to be in plotMotifEnrichment.py but was to slow when implemented in pandas
+#     # Prepare beds for plotting here instead
+    
+#     # 1) position in peak changed to peak centre +/- n b.p. (rather than peak start)
+#     # 2) subset on window to plot (peak centre +/- n b.p. )
+
+#     tmp_dir = "$SCRATCH_DIR"
+#     window = PARAMS["fimo_plot_window"]
+
+#     statement = '''tmp=`mktemp -p %(tmp_dir)s &&
+#                    awk 'BEGIN {OFS="\\t"} 
+#                      {pwidth=$3-$2}
+#                      {pcentre=pwidth/2}
+#                      {if ($5 >= pcentre) print $1,$2,$3,$4,$5-pcentre,$6;
+#                      else print $1,$2,$3,$4,"-"pcentre-$5,$6}'
+#                      <( zcat %(infile)s )
+#                      > $tmp &&
+#                    awk 'BEGIN {OFS="\\t"}
+#                      {if ($5 <= %(window)s && $5 >= -%(window)s ) print $0}' 
+#                      $tmp |
+#                    grep -v "chrM" - |
+#                    gzip - > %(outfile)s'''
+
+#     # problem with erroneous intervals on chrM not of uniform length
+#     # these should be removed as most likely artifacts
+    
+#     print(statement)
+
+#     P.run(statement)
+
+### TEST - merge both statements
 @follows(runFIMO, mkdir("motif.coverage.dir"))
 @files(coverageBedGenerator)
 def coverageBed(infiles, outfile):
-    '''Calculate per base coverage of peaks by motif files'''
+    '''Calculate per base coverage of peaks by motif files
+       & prepare matrix for plotting'''
+
+    # 1) calculate per base coverage of peaks by motifs
+    # 2) position in peak changed to peak centre +/- n b.p. (rather than peak start)
+    # 3) subset on window to plot (peak centre +/- n b.p. )
 
     bed, motif = infiles
-
-    statement = '''coverageBed 
-                     -d 
-                     -a %(bed)s                      
-                     -b %(motif)s 
-                   | gzip - > %(outfile)s '''
-
-    print(statement)
-
-    P.run()
     
-
-@transform(coverageBed,
-           regex(r"(.*).bed.gz"),
-           r"\1.bed.prep.gz")
-def prepareBeds(infile, outfile):
-    '''Prepare BEDs for plotting'''
-
-    # This used to be in plotMotifEnrichment.py but was to slow when implemented in pandas
-    # Prepare beds for plotting here instead
-    
-    # 1) position in peak changed to peak centre +/- n b.p. (rather than peak start)
-    # 2) subset on window to plot (peak centre +/- n b.p. )
-
     tmp_dir = "$SCRATCH_DIR"
     window = PARAMS["fimo_plot_window"]
 
-    statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+    statement = '''tmp1=`mktemp -p %(tmp_dir)s` &&
+                   tmp2=`mktemp -p %(tmp_dir)s` &&
+                   coverageBed 
+                     -d 
+                     -a %(bed)s                      
+                     -b %(motif)s 
+                   | gzip - > $tmp1 &&
                    awk 'BEGIN {OFS="\\t"} 
                      {pwidth=$3-$2}
                      {pcentre=pwidth/2}
                      {if ($5 >= pcentre) print $1,$2,$3,$4,$5-pcentre,$6;
                      else print $1,$2,$3,$4,"-"pcentre-$5,$6}'
-                     <( zcat %(infile)s )
-                     > $tmp ; checkpoint;
+                     <( zcat $tmp1 )
+                     > $tmp2 &&
                    awk 'BEGIN {OFS="\\t"}
                      {if ($5 <= %(window)s && $5 >= -%(window)s ) print $0}' 
-                     $tmp |
+                     $tmp2 |
                    grep -v "chrM" - |
                    gzip - > %(outfile)s'''
 
-    # problem with erroneous intervals on chrM not of uniform length
-    # these should be removed as most likely artifacts
-    
     print(statement)
 
-    P.run()
-
+    P.run(statement)
     
-@transform(prepareBeds,
-           regex(r"(.*).bed.prep.gz"),
+    
+@transform(coverageBed,
+           regex(r"(.*).bed.gz"),
            r"\1.png")
 def plotMotifEnrichment(infile, outfile):
     '''Normalise coverage profiles & plot motif enrichment'''
 
-    job_memory = "35G"
+#    job_memory = "35G"
     
     region_motif = os.path.basename(infile).split(".")
     region = region_motif[0]
@@ -648,7 +675,7 @@ def plotMotifEnrichment(infile, outfile):
                      --fast True 
                      --bins %(bin_size)s'''
 
-    P.run()
+    P.run(statement, job_memory="35G")
 
 
 def plotMotifEnrichmentAllGenerator():
@@ -672,7 +699,7 @@ def plotMotifEnrichmentAllGenerator():
         print([motifs, outfile])
 
 
-@follows(prepareBeds)
+@follows(coverageBed)
 @files(plotMotifEnrichmentAllGenerator)
 def plotMotifEnrichmentAll(infiles, outfile):
     '''Normalise coverage profiles & plot motif enrichment
@@ -695,7 +722,7 @@ def plotMotifEnrichmentAll(infiles, outfile):
                      --fast True
                      --bins %(bin_size)s'''
 
-    P.run()
+    P.run(statement)
     
 
 # @transform(coverageBed,
@@ -710,7 +737,7 @@ def plotMotifEnrichmentAll(infiles, outfile):
 #     # chrM causing errors, many intervals larger than annotated chrom size
 #     # hack = remove chrM peaks
     
-#     statement = '''tmp=`mktemp -p %(tmp_dir)s`; checkpoint;
+#     statement = '''tmp=`mktemp -p %(tmp_dir)s &&
 #                    awk 
 #                      'BEGIN {OFS="\\t"} 
 #                      {X=$3+$5}
@@ -719,11 +746,11 @@ def plotMotifEnrichmentAll(infiles, outfile):
 #                    grep -v "chrM" - |
 #                    sort -k1,1 -k2,2n - |
 #                    mergeBed -c 5 -o mean -d -1 -i - 
-#                      > $tmp; checkpoint;
+#                      > $tmp &&
 #                    bedGraphToBigWig
 #                      $tmp
 #                      %(chrom_sizes)s
-#                      %(outfile)s; checkpoint;
+#                      %(outfile)s &&
 #                    rm $tmp '''
 
 #     P.run()

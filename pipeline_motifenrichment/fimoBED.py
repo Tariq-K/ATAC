@@ -3,7 +3,7 @@ import sys
 from argparse import ArgumentParser
 import pandas as pd
 import os
-import CGAT.Database as DB
+import PipelineMotifenrichment as m
 
 ####### Parse commandline arguments
 parser = ArgumentParser(prog="fimoBED")
@@ -43,7 +43,7 @@ def fimoBed(infile, outfiles, db):
                    from %(fimo)s a, %(peaks)s b 
                    where a.sequence_name = b.peak_id ''' % locals()
     print(query)
-    df = DB.fetch_DataFrame(query, db)
+    df = m.fetch_DataFrame(query, db)
 
 #    df = df[df["q_value"] < padj] # filter by FDR
 # dont filter by FDR, as this is to stringent for motif enrichment plots
