@@ -47,47 +47,37 @@ Code
 ----
 
 """
-# collections, itertools, optparse, os, shutil,sys, tempfile,  shutil, re
-# random
-#import Database
-#import csv
-#import IOTools
-#import GTF, GFF, Bed
-#import numpy
-#import pybedtools
+from ruffus import *
 
-import math, glob  
-#import rpy2.robjects as R
-import CGAT.Experiment as E
+import os
+import math
+import glob  
+import cgatcore.experiment as E
+from cgatcore import pipeline as P
 import logging as L
 import sqlite3
 import gzip
-from bx.intervals.intersection import Interval, IntervalTree
-import CGATPipelines.Pipeline as P
-import CGATPipelines.PipelineGO as PipelineGO
 import pandas as pd
 import pybedtools
 
-# P.getParameters( 
-#      ["pipeline_chartseq/pipeline.ini",
-#       "../pipeline.ini",
-#       "pipeline.ini" ] )
+# -----------------------------------------------
+# Pipeline configuration
+P.get_parameters(
+		 ["%s/pipeline.yml" % os.path.splitext(__file__)[0],
+		  "../pipeline.yml",
+		  "pipeline.yml"],
+		 )
 
-# PARAMS = P.PARAMS
-# PARAMS_ANNOTATIONS = P.peekParameters( PARAMS["annotations_dir"],
-#                                        "pipeline_annotations.py" )
+PARAMS = P.PARAMS
 
+db = PARAMS['database']['url'].split('./')[1]
 
-try:
-    PARAMS = P.getParameters()
-except IOError:
-    pass
 
 #######################################################################
 ########### Key helper functions ######################################
 #######################################################################
 
-def execute(queries, database=PARAMS["database"], attach=False):
+def execute(queries, database=db, attach=False):
     '''Execute a list of statements sequentially'''
 
     dbhandle = sqlite3.connect( database )
@@ -100,7 +90,7 @@ def execute(queries, database=PARAMS["database"], attach=False):
     for statement in queries: cc.execute(statement)
     cc.close()
 
-def fetch(query, database=PARAMS["database"], attach=False):
+def fetch(query, database=db, attach=False):
     '''Fetch all query results and return'''
     dbhandle = sqlite3.connect( database )
     cc = dbhandle.cursor()
@@ -111,7 +101,7 @@ def fetch(query, database=PARAMS["database"], attach=False):
     cc.close()
     return sqlresult
 
-def fetch_with_names(query, database=PARAMS["database"], attach=False):
+def fetch_with_names(query, database=db, attach=False):
     '''Fetch all query results and returns them as a dictionary'''
     dbhandle = sqlite3.connect( database )
     cc = dbhandle.cursor()
