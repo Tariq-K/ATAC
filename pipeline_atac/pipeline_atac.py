@@ -1201,16 +1201,21 @@ def fetchEnsemblGeneset(infile,outfile):
         the great gene set: For that we would only want protein coding genes with
         GO annotations '''
 
-    statement = '''select gi.gene_id, gi.gene_name,
-                          gs.contig, gs.start, gs.end, gs.strand
-                   from gene_info gi
-                   inner join gene_stats gs
-                   on gi.gene_id=gs.gene_id
-                   where gi.gene_biotype="protein_coding"
-                '''
+    # statement = '''select gi.gene_id, gi.gene_name,
+    #                       gs.contig, gs.start, gs.end, gs.strand
+    #                from gene_info gi
+    #                inner join gene_stats gs
+    #                on gi.gene_id=gs.gene_id
+    #                where gi.gene_biotype="protein_coding"
+    #             '''
 
-    anndb = os.path.join(PARAMS["annotations_dir"],
-                         "csvdb")
+    statement = '''select a.gene_id, a.gene_name, b.contig, b.start, b.end 
+                     from gene_info a 
+                     inner join geneset_all_gtf b
+                     on a.gene_id = b.gene_id
+                     where gene_biotype = "protein_coding" '''
+
+    anndb = os.path.join(PARAMS["annotations_dir"], "csvdb")
 
     df = fetch_DataFrame(statement, anndb)
     df.to_csv(outfile, index=False, sep="\t", header=True)
