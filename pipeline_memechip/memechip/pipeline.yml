@@ -11,6 +11,9 @@ database: csvdb
 csv2db_options: --backend=sqlite --retry --map=gene_id:str --map=contig:str --map=transcript_id:str 
 
 memechip:
+    # conda env name to run meme-chip (must be python 2)
+    env: meme
+    
     # list of public Db's
     motif_db:
         - /gfs/apps/bio/meme-4.11.2/db/motif_databases/JASPAR/JASPAR_CORE_2016.meme

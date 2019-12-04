@@ -43,20 +43,15 @@ Input files
 
 Requirements
 ------------
+cgat-flow,
+cgat-core,
+cgat-apps,
 
-The pipeline requires the results from
-:doc:`pipeline_annotations`. Set the configuration variable
-:py:data:`annotations_database` and :py:data:`annotations_dir`.
+MEME venv:
+- use conda to create a python 2 venv with which to run meme BEFORE running pipeline
+- e.g. conda create -n meme python=2.7.14 meme
+- specify the name of meme venv in pipeline.yml
 
-On top of the default CGAT setup, the pipeline requires the following
-software to be in the path:
-
-.. Add any additional external requirements such as 3rd party software
-   or R modules below:
-
-Requirements:
-
-* samtools >= 1.1
 
 Pipeline output
 ===============
@@ -314,6 +309,8 @@ def runMemeChIP(infile, outfile):
     #     - Takes 10x more computing power than option 1 and is less sensitive to weak, non-repeated motifs
         
     mode = PARAMS["memechip_mode"]
+
+    env = PARAMS["memechip_env"]
     
     statement = '''nmeme=`wc -l %(infile)s | tr -s "[[:blank:]]" "\\t" | cut -f1` &&
                    meme-chip
@@ -331,9 +328,9 @@ def runMemeChIP(infile, outfile):
                      > %(outfile)s ''' 
 
     # python3 version of tomtom does exist but isn't called by meme-chip
-    # therefore run in macs2 conda env (python 2.7)
+    # therefore run in python 2 conda env
 
-    P.run(statement, job_condaenv="macs2", job_memory="2G", job_threads=5)
+    P.run(statement, job_condaenv=env, job_memory="2G", job_threads=5)
 
     
 def loadMemeTomTomGenerator():
@@ -605,7 +602,7 @@ def runHomerAnalysis():
     pass
 
 
-@follows(runMemeAnalysis)
+#@follows(runMemeAnalysis)
 @files(None, "*.nbconvert.html")
 def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template(s)'''
@@ -639,7 +636,7 @@ def report(infile, outfile):
         P.run(statement)
 
         
-@follows(runMemeAnalysis, runHomerAnalysis, report)
+@follows(runMemeAnalysis, runHomerAnalysis)
 def runMotifAnalysis():
     pass
 
@@ -1075,7 +1072,7 @@ def runMastAnalysis():
 ###############################################################################
 ########################### Pipeline Targets ##################################
 ###############################################################################
-@follows(runMotifAnalysis, runMastAnalysis)
+@follows(runMotifAnalysis, runMastAnalysis, report)
 def full():
     pass
 
