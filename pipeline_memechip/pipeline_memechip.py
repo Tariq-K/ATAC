@@ -49,7 +49,7 @@ cgat-apps,
 
 MEME venv:
 - use conda to create a python 2 venv with which to run meme BEFORE running pipeline
-- e.g. conda create -n meme python=2.7.14 meme
+- e.g. conda create -n meme python=2.7.14 meme=4.11.2
 - specify the name of meme venv in pipeline.yml
 
 
