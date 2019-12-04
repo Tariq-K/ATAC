@@ -51,7 +51,7 @@
 #    - cgat-core, cgat-flow (https://github.com/cgat-developers)
 #    - Bowtie2
 #    - Macs2
-#    - PicardTools
+#    - PicarTools
 #    - deepTools
 #    - BedTools
 #    - samtools
@@ -409,6 +409,7 @@ def removeDuplicates(infile, outfile):
                      OUTPUT=$tmp 
                      METRICS_FILE=%(metrics_file)s 
                      VALIDATION_STRINGENCY=SILENT
+                     TMP_DIR=/gfs/scratch/
                      2> %(log)s  && 
                    mv $tmp %(outfile)s && 
                    samtools index %(outfile)s'''
@@ -592,7 +593,8 @@ def picardInsertSizes(infile, outfile):
     histogram = outfile.replace("Metrics.txt", "Histogram.txt")
     
     statement = '''tmp=`mktemp -p %(tmp_dir)s` && 
-                   java -Xms12G -Xmx32G -jar /gfs/apps/bio/picard-tools-2.15.0/picard.jar CollectInsertSizeMetrics
+                   java -Xms12G -Xmx45G -jar /gfs/apps/bio/picard-tools-2.15.0/picard.jar CollectInsertSizeMetrics
+                     TMP_DIR=/gfs/scratch/
                      I=%(infile)s 
                      O=$tmp
                      H=%(pdf)s
@@ -601,7 +603,8 @@ def picardInsertSizes(infile, outfile):
                    cat $tmp | grep -A 2 "## METRICS CLASS" $tmp | grep -v "#" > %(outfile)s &&
                    rm $tmp'''
 
-    P.run(statement, job_memory="8G", job_threads=5)
+    
+    P.run(statement, job_memory="10G", job_threads=5)
 
     
 @merge(picardInsertSizes,
@@ -874,10 +877,10 @@ def mergeReplicatePeaks(infiles, outfile):
 
                 [contig, start, end, peak_id, peak_score, strand, FC, pval, qval, summit] = cols
 
-                reps = [x.split("_")[3] for x in peak_id.split(",")]
+#                reps = [x.split("_")[3] for x in peak_id.split(",")] # this is dependent on sample naming...
 
                 # get unique elements from list of replicates by converting to set
-                if len(set(reps)) >= rep_overlaps:
+                if len(set(peak_id.split(",")) >= rep_overlaps:
                     # outfile
                     bed = [contig, start, end, peak_id, peak_score, strand, FC, pval, qval, summit]
                     bed = '\t'.join(bed) + '\n'
