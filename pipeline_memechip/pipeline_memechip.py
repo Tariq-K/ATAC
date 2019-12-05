@@ -6,13 +6,13 @@ Overview
 ========
 
 This pipeline runs MEME-ChIP and Homer for de novo motif discovery at provided bed files. Motif
-discovery settings can be configured in pipeline.ini.
+discovery settings can be configured in pipeline.yml.
 
 After motif discovery MAST can be run to rank input peaks by specified motifs (either de novo 
 motifs discovered by meme, or database entries for known motifs, or both).
 
 Output files are html report of motif discovery runs, a summary notebook, and bed files for 
-motifs of interes in input peaks. 
+motifs of interest in input peaks. 
 
 Usage
 =====
@@ -194,21 +194,22 @@ def getMemeForegroundBed(infile, outfile):
     end_width = (int(width) / 2) - 1 # as bed file is chr, peak_centre_minus1, peak_centre_plus1
     
     if npeaks != "all":
-        statement = '''slopBed 
-                         -i <(head -n %(npeaks)s %(infile)s )
-                         -g %(chrom_sizes)s 
-                         -l %(start_width)s 
-                         -r %(end_width)s 
+        statement = f'''slopBed 
+                         -i <(head -n {npeaks} {infile} )
+                         -g {chrom_sizes}
+                         -l {start_width} 
+                         -r {end_width} 
                          -s 
-                         > %(outfile)s''' 
+                         > {outfile}''' 
         
     else:
         statement = '''slopBed 
-                         -i  %(infile)s 
-                         -g %(chrom_sizes)s 
-                         -l %(start_width)s 
-                         -r %(end_width)s 
-                         -s > %(outfile)s'''
+                         -i  {infile} 
+                         -g {chrom_sizes} 
+                         -l {start_width} 
+                         -r {end_width}
+                         -s 
+                         > {outfile}'''
    
     P.run(statement)
 
@@ -221,16 +222,16 @@ def getMemeBackgroundBed(infile, outfile):
 
     genome_idx = os.path.join(PARAMS["annotations_mm10dir"],"assembly.dir/contigs.tsv")
     
-    statement ='''sort 
-                    -k1,1 
-                    -k2,2n 
-                    %(infile)s | 
-                  bedtools flank 
-                    -pct 
-                    -l 1 
-                    -r 1 
-                    -g %(genome_idx)s 
-                    > %(outfile)s'''
+    statement = f'''sort 
+                     -k1,1 
+                     -k2,2n 
+                     {infile} | 
+                   bedtools flank 
+                     -pct 
+                     -l 1 
+                     -r 1 
+                     -g {genome_idx} 
+                     > {outfile}'''
     
                # -pct -l 1 -r 1 will create flanking regions = peak width
 
@@ -247,10 +248,10 @@ def getMemeSequences(infile, outfile):
     genome_fasta = os.path.join(PARAMS["genome_dir"],PARAMS["genome"]+".fasta")
     genome_idx = os.path.join(PARAMS["annotations_mm10dir"],"assembly.dir/contigs.tsv")
 
-    statement = '''fastaFromBed 
-                     -fi %(genome_fasta)s 
-                     -bed %(infile)s 
-                     -fo %(outfile)s'''
+    statement = f'''fastaFromBed 
+                     -fi {genome_fasta} 
+                     -bed {infile}
+                     -fo {outfile}'''
     
     P.run(statement)
     
@@ -260,9 +261,9 @@ def getMemeSequences(infile, outfile):
 def getMemeBfiles(infile, outfile):
     '''prepare the meme background model'''
 
-    statement='''fasta-get-markov 
-                   -m 2 %(infile)s  
-                   > %(outfile)s''' 
+    statement = f'''fasta-get-markov 
+                      -m 2 {infile}  
+                      > {outfile}''' 
 
     P.run(statement)
     
@@ -312,20 +313,20 @@ def runMemeChIP(infile, outfile):
 
     env = PARAMS["memechip_env"]
     
-    statement = '''nmeme=`wc -l %(infile)s | tr -s "[[:blank:]]" "\\t" | cut -f1` &&
-                   meme-chip
-                     -oc %(outdir)s
-                     -db %(motifDb)s
-                     -bfile %(bfile)s
-                     -ccut 0
-                     -nmeme $nmeme
-                     -meme-mod %(mode)s
-                     -meme-minw 5
-                     -meme-maxw 30
-                     -meme-nmotifs %(nmotifs)s
-                     -meme-maxsize %(meme_max_jobs)s
-                     %(infile)s
-                     > %(outfile)s ''' 
+    statement = f'''nmeme=`wc -l {infile} | tr -s "[[:blank:]]" "\\t" | cut -f1` &&
+                    meme-chip
+                      -oc {outdir}
+                      -db {motifDb}
+                      -bfile {bfile}
+                      -ccut 0
+                      -nmeme $nmeme
+                      -meme-mod {mode}
+                      -meme-minw 5
+                      -meme-maxw 30
+                      -meme-nmotifs {nmotifs}
+                      -meme-maxsize {meme_max_jobs}
+                      {infile}
+                      > {outfile} ''' 
 
     # python3 version of tomtom does exist but isn't called by meme-chip
     # therefore run in python 2 conda env
@@ -471,11 +472,11 @@ def summarizeFimo(infiles, outfile):
 
     tmp_dir = "$SCRATCH_DIR"
 
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                   cat %(infiles)s | 
-                     grep -v "#" | 
-                     sort -k1,1n > $tmp &&
-                   [[ -s $tmp ]] && mv $tmp %(outfile)s || rm $tmp'''
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                    cat {infiles} | 
+                      grep -v "#" | 
+                      sort -k1,1n > $tmp &&
+                    [[ -s $tmp ]] && mv $tmp {outfile} || rm $tmp'''
 
     P.run(statement)
 
@@ -489,9 +490,9 @@ def loadFimo(infile, outfile):
     options='-H "pattern_name,sequence_name,start,stop,strand,score,p_value,q_value,matched_sequence" '
 
     statement = []
-    statement.append('''cat %(infile)s | ''')
+    statement.append(f'''cat {infile} | ''')
     statement.append(P.build_load_statement(tablename, options=options, retry=True) )
-    statement.append(''' > %(outfile)s''')
+    statement.append(f''' > {outfile}''')
     statement = ' '.join(statement)
     
     P.run(statement)
@@ -516,15 +517,15 @@ def runHomerFindMotifs(infile, outfile):
     outdir = outfile.replace(".homer.log", "")
     bfile = infile.replace(".foreground.fasta", ".background.fasta")
 
-    statement = '''if [ ! -d %(outdir)s ]; 
-                     then mkdir %(outdir)s; 
-                     fi;
-                   findMotifs.pl 
-                     %(infile)s 
-                     fasta 
-                     %(outdir)s 
-                     -fastaBg %(bfile)s
-                     &> %(outfile)s''' 
+    statement = f'''if [ ! -d {outdir} ]; 
+                      then mkdir {outdir}; 
+                      fi;
+                    findMotifs.pl 
+                      {infile} 
+                      fasta 
+                      {outdir} 
+                      -fastaBg {bfile}
+                      &> {outfile}''' 
 
     P.run(statement)
 
@@ -542,16 +543,16 @@ def runHomerFindMotifsGenome(infile, outfile):
     tmp_dir = "$SCRATCH_DIR"
     outdir = outfile.replace(".homer.log", "")
    
-    statement = '''peaks=`mktemp -p %(tmp_dir)s` &&
-                  awk 'BEGIN {OFS="\\t"} {print $0,0}' %(infile)s > $peaks && 
-                  findMotifsGenome.pl 
-                    $peaks
-                    mm10
-                    %(outdir)s
-                    -h
-                    -size given
-                    &> %(outfile)s &&
-                  rm $peaks'''
+    statement = f'''peaks=`mktemp -p {tmp_dir}` &&
+                   awk 'BEGIN {{OFS="\\t"}} {{print $0,0}}' {infile} > $peaks && 
+                   findMotifsGenome.pl 
+                     $peaks
+                     mm10
+                     {outdir}
+                     -h
+                     -size given
+                     &> {outfile} &&
+                   rm $peaks'''
     
     P.run(statement)
     
@@ -574,13 +575,13 @@ def annotatePeaks(infile, outfile):
     # search for all discovered motifs
     motifs = "homer.genome.dir/" + run + "/homerResults/motif*.motif"
     
-    statement = '''annotatePeaks.pl 
-                     %(peak_file)s
-                     mm10 
-                     -size 1000 
-                     -hist 5 
-                     -m %(motifs)s
-                     > %(outfile)s'''
+    statement = f'''annotatePeaks.pl 
+                      {peak_file}
+                      mm10 
+                      -size 1000 
+                      -hist 5 
+                      -m {motifs}
+                      > {outfile}'''
     P.run(statement)
     
                   
@@ -590,9 +591,9 @@ def annotatePeaks(infile, outfile):
 def homerMotifEnrichmentPlot(infile, outfile):
     '''Process results from annotatePeaks and plot motif enrichment relative to peaks'''
 
-    statement = '''python motifPlot.py 
-                     %(infile)s 
-                     %(outfile)s'''
+    statement = f'''python motifPlot.py 
+                      {infile} 
+                      {outfile}'''
 
     P.run(statement)
     
@@ -619,19 +620,19 @@ def report(infile, outfile):
         nbconvert = infile.replace(".ipynb", ".nbconvert.ipynb")
         tmp = os.path.basename(template)
     
-        statement = '''cp %(template)s .  &&
-                   jupyter nbconvert 
-                     --to notebook 
-                     --allow-errors 
-                     --ExecutePreprocessor.timeout=None
-                     --ExecutePreprocessor.kernel_name=python3
-                     --execute %(infile)s &&
-                   jupyter nbconvert 
-                     --to html 
-                     --ExecutePreprocessor.timeout=None
-                     --ExecutePreprocessor.kernel_name=python3
-                     --execute %(nbconvert)s &&
-                   rm %(tmp)s'''
+        statement = f'''cp {template} .  &&
+                        jupyter nbconvert 
+                          --to notebook 
+                          --allow-errors 
+                          --ExecutePreprocessor.timeout=None
+                          --ExecutePreprocessor.kernel_name=python3
+                          --execute {infile} &&
+                        jupyter nbconvert 
+                          --to html 
+                          --ExecutePreprocessor.timeout=None
+                          --ExecutePreprocessor.kernel_name=python3
+                          --execute {nbconvert} &&
+                        rm {tmp}'''
 
         P.run(statement)
 
@@ -658,18 +659,18 @@ def runAme(infile,  outfile):
     
     motifDb =  PARAMS["ame_motif_db"]
     
-    statement='''ame
-                 --verbose 1
-                 --oc %(outdir)s
-                 --fix-partition %(nfgseq)s
-                 --scoring totalhits
-                 --bgfile %(bfile)s
-                 --bgformat 2
-                 --method fisher
-                 --length-correct
-                 <( cat %(infile)s )
-                 <( cat %(motifDb)s )
-                 > %(outfile)s '''
+    statement = f'''ame
+                     --verbose 1
+                     --oc {outdir}
+                     --fix-partition {nfgseq}
+                     --scoring totalhits
+                     --bgfile {bfile}
+                     --bgformat 2 
+                     --method fisher
+                     --length-correct
+                     <( cat {infile} )
+                     <( cat {motifDb} )
+                     > {outfile}'''
 
     P.run(statement, job_memory="10G", job_threads=4)
 
@@ -696,10 +697,10 @@ def getMemeMotif(infile, outfile):
         motif_end = "^SUMMARY" 
         
 
-    statement = '''sed -n '/^MEME/,/^MOTIF  1/p' %(meme_out)s | 
-                     head -n-1 > %(outfile)s ; 
-                   sed -n '/%(motif_start)s/,/%(motif_end)s/p' %(meme_out)s | 
-                     head -n -1 >> %(outfile)s'''
+    statement = f'''sed -n '/^MEME/,/^MOTIF  1/p' {meme_out} | 
+                      head -n-1 > {outfile} ; 
+                    sed -n '/{motif_start}/,/{motif_end}/p' {meme_out} | 
+                      head -n -1 >> {outfile}'''
 
     P.run(statement)
     
@@ -717,9 +718,9 @@ def filterTFDatabases(infile, outfile):
     
     for TF in motifs:
     
-        statement = '''awk '/^MOTIF/ {p=0} /%(TF)s/ {p=1} p' 
-                         <( cat %(TFdb)s ) 
-                         >> %(outfile)s'''
+        statement = f'''awk '/^MOTIF/ {{p=0}} /{TF}/ {{p=1}} p' 
+                          <( cat {TFdb} ) 
+                          >> {outfile}'''
 
         P.run(statement)
 
@@ -730,10 +731,10 @@ def addMemeMotifHeader(infile, outfile):
 
     TFdb = PARAMS["mast_motif_db"].split(",")[0]
 
-    statement = '''head -n9 %(TFdb)s | 
-                     cat - %(infile)s 
-                       > tmp && 
-                     mv tmp %(outfile)s'''
+    statement = f'''head -n9 {TFdb} | 
+                      cat - {infile} 
+                        > tmp && 
+                      mv tmp {outfile}'''
 
     P.run(statement)
 
@@ -747,11 +748,11 @@ def getInputPeakSequences(infile, outfile):
 
     genome_fasta = os.path.join(PARAMS["genome_dir"],PARAMS["genome"]+".fasta")
 
-    statement = '''fastaFromBed 
-                     -name 
-                     -fi %(genome_fasta)s 
-                     -bed %(infile)s 
-                     -fo %(outfile)s'''
+    statement = f'''fastaFromBed 
+                      -name 
+                      -fi {genome_fasta} 
+                      -bed {infile} 
+                      -fo {outfile}'''
 
     P.run(statement)
 
@@ -767,20 +768,20 @@ def getInputPeakBackgroundFASTA(infile, outfile):
     genome_fasta = os.path.join(PARAMS["genome_dir"],PARAMS["genome"]+".fasta")
     tmp_dir = "$SCRATCH_DIR"
     
-    statement ='''tmp=`mktemp -p %(tmp_dir)s` &&
-                  sort -k1,1 -k2,2n %(infile)s | 
-                    bedtools flank 
-                      -pct 
-                      -l 1 
-                      -r 1 
-                      -g %(genome_idx)s 
-                      > $tmp &&
-                  fastaFromBed 
-                    -name 
-                    -fi %(genome_fasta)s 
-                    -bed $tmp 
-                    -fo %(outfile)s &&
-                  rm $tmp'''
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                    sort -k1,1 -k2,2n {infile} | 
+                      bedtools flank 
+                        -pct 
+                        -l 1 
+                        -r 1 
+                        -g {genome_idx} 
+                        > $tmp &&
+                    fastaFromBed 
+                      -name 
+                      -fi {genome_fasta} 
+                      -bed $tmp 
+                      -fo {outfile} &&
+                    rm $tmp'''
     
     P.run(statement)
     
@@ -790,10 +791,10 @@ def getInputPeakBackgroundFASTA(infile, outfile):
 def getInputPeakBackgroundModel(infile, outfile):
     '''prepare the meme background model'''
 
-    statement='''fasta-get-markov 
-                   -m 2 
-                   %(infile)s  
-                   > %(outfile)s'''
+    statement = f'''fasta-get-markov 
+                      -m 2 
+                      {infile}  
+                      > {outfile}'''
 
     P.run(statement)
 
@@ -822,13 +823,13 @@ def runMast(infiles, outfile):
             suffix = os.path.basename(motif).replace(".meme", "") 
             outdir = '.'.join([outfile[:-len(".mast.log")], suffix])
 
-            statement = '''mast 
-                           -w              
-                           %(b_opt)s
-                           -oc %(outdir)s
-                           <(cat %(motif)s )
-                           %(sequences)s
-                           &> %(outfile)s '''
+            statement = f'''mast 
+                            -w              
+                            {b_opt}
+                            -oc {outdir}
+                            <(cat {motif} )
+                            {sequences}
+                            &> {outfile} '''
 
             P.run(statement, job_memory="5G", job_threads=4)
 
@@ -844,9 +845,9 @@ def loadPeaks(infile, outfile):
     options='-H "contig,start,end,peak_id,score" '
 
     statement = []
-    statement.append('''cat %(infile)s | cut -f1-5 - |''')
+    statement.append(f'''cat {infile} | cut -f1-5 - |''')
     statement.append(P.build_load_statement(tablename, options=options, retry=True) )
-    statement.append(''' > %(outfile)s''')
+    statement.append(f''' > {outfile}''')
     statement = ' '.join(statement)
     
     to_cluster = True
@@ -867,14 +868,14 @@ def loadMast(infile, outfile):
     options='-H "peak_id,e_value,length" '
 
     statement = []
-    statement.append('''tmp=`mktemp -p %(tmp_dir)s` &&
-                        sed -n '/^SECTION I:/,/^SECTION II:/p' %(infile)s | 
-                          grep "^[a-zA-Z].*[0-9]$" - | 
-                          tr -s "[[:blank:]]" "\\t" 
-                          > $tmp &&
-                        cat $tmp ''')
+    statement.append(f'''tmp=`mktemp -p {tmp_dir}` &&
+                         sed -n '/^SECTION I:/,/^SECTION II:/p' {infile} | 
+                           grep "^[a-zA-Z].*[0-9]$" - | 
+                           tr -s "[[:blank:]]" "\\t" 
+                           > $tmp &&
+                         cat $tmp ''')
     statement.append(P.build_load_statement(tablename, options=options, retry=True))
-    statement.append(''' > %(outfile)s && rm $tmp''')    
+    statement.append(f''' > {outfile} && rm $tmp''')    
     statement = '|'.join(statement)
 
     P.run(statement)
@@ -891,8 +892,8 @@ def mast_table(infile, outfile):
     mast_table = "MAST_" + infile.split("/")[2].replace(".", "_")
     peak_table = infile.split("/")[2].split(".")[0] + "_peaks"
 
-    query = '''select a.contig, a.start, a.end, a.peak_id, b.e_value 
-               from %(peak_table)s a, %(mast_table)s b where a.peak_id = b.peak_id''' % locals()
+    query = f'''select a.contig, a.start, a.end, a.peak_id, b.e_value 
+               from {peak_table} a, {mast_table} b where a.peak_id = b.peak_id'''
 
     df = Database.fetch_DataFrame(query, db)
     df.to_csv(outfile, header=False, index=None, sep="\t")
@@ -912,7 +913,7 @@ def runMast_HitList(infiles, outfile):
     background = PARAMS["mast_background"]
     if background == "custom":
         bfile = sequences.replace(".input_sequences.fasta", ".input_background.bfile")
-        b_opt = '''-bfile %(bfile)s''' % locals()
+        b_opt = f'''-bfile {bfile}''' 
     else:
         b_opt = ''' '''
          
@@ -922,16 +923,16 @@ def runMast_HitList(infiles, outfile):
         outdir = '.'.join([outfile[:-len(".mast.hit_list.log")], suffix])
         hlist = outdir + "/mast.hit_list.txt"
 
-        statement = '''mast 
-                         -hit_list
-                         -best
-                         %(b_opt)s
-                         -w              
-                         -oc %(outdir)s
-                         <(cat %(motif)s )
-                         %(sequences)s
-                         > %(hlist)s
-                         2>> %(outfile)s '''
+        statement = f'''mast 
+                          -hit_list
+                          -best
+                          {b_opt}
+                          -w              
+                          -oc {outdir}
+                          <(cat {motif} )
+                          {sequences}
+                          > {hlist}
+                          2>> {outfile} '''
         
         P.run(statement, job_memory="5G", job_threads=4)
         
@@ -941,12 +942,12 @@ def runMast_HitList(infiles, outfile):
 def motifTable(infile, outfile):
     '''count motifs in .meme db'''
 
-    statement = '''cat %(infile)s | 
+    statement = f'''cat {infile} | 
                      grep MOTIF | 
                      tr -s " " | 
                      sed 's/ /\\t/g' | 
-                     awk 'BEGIN {OFS="\\t"} {print $2,$3,NR}' 
-                     > %(outfile)s'''
+                     awk 'BEGIN {{OFS="\\t"}} {{print $2,$3,NR}}' 
+                     > {outfile}'''
 
     P.run(statement)
     
@@ -973,24 +974,24 @@ def HitList_table(infile, outfile):
         out = infile.replace(".txt", ".table.txt")
 
         statement = []
-        statement.append('''grep -v "#" %(infile)s | 
-                              tr -s "[[:blank:]]" "\\t" | 
-                              sort -k5,5rn | 
-                              sed 's/\([+-]\)\([0-9]\)/\\1\\t\\2/' ''')
+        statement.append(f'''grep -v "#" {infile} | 
+                               tr -s "[[:blank:]]" "\\t" | 
+                               sort -k5,5rn | 
+                               sed 's/\([+-]\)\([0-9]\)/\\1\\t\\2/' ''')
         
         if "denovo" in infile:
             ### check what needs to be specified here - it should not be necessary
             ### as motif files can be added into data.dir/ and should be named accordingly
             motif_name = PARAMS["mast_meme_motif"].split(",")
-            cmd_suffix = ''' sed 's/\(\\t1\\t\)/\\t%(motif_name)s\\t/' ''' % locals()
+            cmd_suffix = f'''sed 's/\(\\t1\\t\)/\\t{motif_name}\\t/' ''' 
             statement.append(cmd_suffix)
             
         if os.path.exists(infile):
-            statement = '|'.join(statement) + ''' > %(out)s'''
+            statement = '|'.join(statement) + f''' > {out}'''
             P.run(statement)
             
         else:
-            message = '''%(infile)s does not exist''' % locals()
+            message = f'''{infile} does not exist''' 
             print(message)
 
     P.touch(outfile)
@@ -1029,20 +1030,20 @@ def mastHitList_results(infiles, outfile):
             motif_id_table = "db_motifs_table"
             
             if mname == "denovo_motif":
-                query = '''select b.contig, b.start + a.hit_start as start, b.start + a.hit_end as end, 
-                           a.peak_id, a.score as mast_score, a.strand, a.motif_no as motif_name, a.hit_p_value as p_value 
-                           from %(hit_list_table)s a, %(peak_table)s b 
-                           where a.peak_id = b.peak_id order by mast_score desc''' % locals()
+                query = f'''select b.contig, b.start + a.hit_start as start, b.start + a.hit_end as end, 
+                            a.peak_id, a.score as mast_score, a.strand, a.motif_no as motif_name, a.hit_p_value as p_value 
+                            from {hit_list_table} a, {peak_table} b 
+                            where a.peak_id = b.peak_id order by mast_score desc'''
 
             elif mname == "db_motifs":
-                query = '''select b.contig, b.start + a.hit_start as start, b.start + a.hit_end as end, 
-                           a.peak_id, a.score as mast_score, a.strand, c.motif_name, a.hit_p_value as p_value 
-                           from %(hit_list_table)s a inner join %(peak_table)s b 
-                           on a.peak_id = b.peak_id inner join %(motif_id_table)s c 
-                           on a.motif_no = c.motif_no order by mast_score desc''' % locals()
+                query = f'''select b.contig, b.start + a.hit_start as start, b.start + a.hit_end as end, 
+                            a.peak_id, a.score as mast_score, a.strand, c.motif_name, a.hit_p_value as p_value 
+                            from {hit_list_table} a inner join {peak_table} b 
+                            on a.peak_id = b.peak_id inner join {motif_id_table} c 
+                            on a.motif_no = c.motif_no order by mast_score desc''' 
 
             else:
-                error_message = "%(motif)s file not recognised" % locals()
+                error_message = f"{motif} file not recognised" 
                 print(error_message)
 
             if n == 1:

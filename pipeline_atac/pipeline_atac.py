@@ -285,14 +285,8 @@ def fetch_DataFrame(query,
 
 
 # ---------------------------------------------------
-
 # Configure pipeline global variables
-
 Unpaired = isPaired(glob.glob("data.dir/*fastq*gz"))
-
-# ---------------------------------------------------
-# Specific pipeline tasks
-
 
 #####################################################
 ####                Mapping                      ####
@@ -320,19 +314,19 @@ def mapBowtie2_PE(infile, outfile):
     options = PARAMS["bowtie2_options"]
     genome = os.path.join(PARAMS["bowtie2_genomedir"], PARAMS["bowtie2_genome"])
 
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` && 
+    statement = f'''tmp=`mktemp -p {tmp_dir}` && 
                    bowtie2 
                      --quiet 
                      --threads 12 
-                     -x %(genome)s
-                     -1 %(read1)s 
-                     -2 %(read2)s
-                     %(options)s
+                     -x {genome}
+                     -1 {read1} 
+                     -2 {read2}
+                     {options}
                      1> $tmp 
-                     2> %(log)s && 
-                   samtools sort -O BAM -o %(outfile)s $tmp && 
-                   samtools index %(outfile)s && 
-                   rm $tmp''' % locals()
+                     2> {log} && 
+                   samtools sort -O BAM -o {outfile} $tmp && 
+                   samtools index {outfile} && 
+                   rm $tmp'''
 
     P.run(statement,job_memory="2G",job_threads=12)
 
@@ -353,18 +347,18 @@ def mapBowtie2_SE(infile, outfile):
     options = PARAMS["bowtie2_options"]
     genome = os.path.join(PARAMS["bowtie2_genomedir"], PARAMS["bowtie2_genome"])
 
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
                    bowtie2 
                      --quiet 
                      --threads 12 
-                     -x %(genome)s
-                     -U %(infile)s 
-                     %(options)s
+                     -x {genome}
+                     -U {infile} 
+                     {options}
                      1> $tmp 
-                     2> %(log)s &&
-                   samtools sort -O BAM -o %(outfile)s $tmp &&
-                   samtools index %(outfile)s &&
-                   rm $tmp''' % locals()
+                     2> {log} &&
+                   samtools sort -O BAM -o {outfile} $tmp &&
+                   samtools index {outfile} &&
+                   rm $tmp'''
 
     P.run(statement,job_memory="2G",job_threads=12)
 
@@ -376,16 +370,16 @@ def filterBam(infile, outfile):
 
     local_tmpdir = "/gfs/scratch/"
         
-    statement = '''tmp=`mktemp -p %(local_tmpdir)s` && 
-                   head=`mktemp -p %(local_tmpdir)s` &&
-                   samtools view -h %(infile)s | grep "^@" - > $head  && 
-                   samtools view -q10 %(infile)s | 
+    statement = f'''tmp=`mktemp -p {local_tmpdir}` && 
+                   head=`mktemp -p {local_tmpdir}` &&
+                   samtools view -h {infile} | grep "^@" - > $head  && 
+                   samtools view -q10 {infile} | 
                      grep -v "chrM" - | 
                      cat $head - |
                      samtools view -h -o $tmp -  && 
-                   samtools sort -O BAM -o %(outfile)s $tmp  &&
-                   samtools index %(outfile)s &&
-                   rm $tmp $head''' % locals()
+                   samtools sort -O BAM -o {outfile} $tmp  &&
+                   samtools index {outfile} &&
+                   rm $tmp $head'''  
 
     P.run(statement, job_memory="10G", job_threads=2)
     
@@ -400,19 +394,19 @@ def removeDuplicates(infile, outfile):
     log = outfile + ".picardlog"
     tmp_dir = "$SCRATCH_DIR"
 
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` && 
+    statement = f'''tmp=`mktemp -p {tmp_dir}` && 
                    MarkDuplicates 
-                     INPUT=%(infile)s 
+                     INPUT={infile} 
                      ASSUME_SORTED=true 
                      REMOVE_DUPLICATES=true 
                      QUIET=true 
                      OUTPUT=$tmp 
-                     METRICS_FILE=%(metrics_file)s 
+                     METRICS_FILE={metrics_file} 
                      VALIDATION_STRINGENCY=SILENT
                      TMP_DIR=/gfs/scratch/
-                     2> %(log)s  && 
-                   mv $tmp %(outfile)s && 
-                   samtools index %(outfile)s'''
+                     2> {log}  && 
+                   mv $tmp {outfile} && 
+                   samtools index {outfile}'''
 
     P.run(statement, job_memory="12G", job_threads=2)
 
@@ -429,17 +423,17 @@ def size_filterBam(infile, outfile):
     insert_size_filter_F = PARAMS["bowtie2_insert_size"]
     insert_size_filter_R = "-" + str(insert_size_filter_F) # reverse reads have "-" prefix for TLEN
 
-    statement = '''tmp=`mktemp -p %(local_tmpdir)s` && 
-                   head=`mktemp -p %(local_tmpdir)s` && 
-                   samtools view -h %(infile)s | grep "^@" - > $head  && 
-                   samtools view %(infile)s | 
-                     awk 'BEGIN {OFS="\\t"} {if ($9 ~ /^-/ && $9 > %(insert_size_filter_R)s) print $0 ;
-                       else if ($9 ~ /^[0-9]/ && $9 < %(insert_size_filter_F)s) print $0}' - |     
+    statement = f'''tmp=`mktemp -p {local_tmpdir}` && 
+                   head=`mktemp -p {local_tmpdir}` && 
+                   samtools view -h {infile} | grep "^@" - > $head  && 
+                   samtools view {infile} | 
+                     awk 'BEGIN {{OFS="\\t"}} {{if ($9 ~ /^-/ && $9 > {insert_size_filter_R}) print $0 ;
+                       else if ($9 ~ /^[0-9]/ && $9 < {insert_size_filter_F}) print $0}}' - |     
                      cat $head - |
                      samtools view -h -o $tmp -  && 
-                   samtools sort -O BAM -o %(outfile)s $tmp  && 
-                   samtools index %(outfile)s &&
-                   rm $tmp $head''' % locals()
+                   samtools sort -O BAM -o {outfile} $tmp  && 
+                   samtools index {outfile} &&
+                   rm $tmp $head'''  
 
     P.run(statement, job_memory="10G", job_threads=2)
 
@@ -449,7 +443,7 @@ def size_filterBam(infile, outfile):
 def indexBam(infile, outfile):
     '''index bams, if index failed to be generated'''
 
-    statement = '''samtools index -b %(infile)s > %(outfile)s'''
+    statement = f'''samtools index -b {infile} > {outfile}'''
 
     P.run(statement)
 
@@ -467,9 +461,9 @@ def contigReadCounts(infile, outfile):
     tmp_dir = "$SCRATCH_DIR"
     name = os.path.basename(infile).rstrip(".bam")
     
-    statement =  '''tmp=`mktemp -p %(tmp_dir)s` && 
-                    samtools idxstats %(infile)s > $tmp &&
-                    awk 'BEGIN {OFS="\\t"} {print $0,"%(name)s"}' $tmp > %(outfile)s &&
+    statement =  f'''tmp=`mktemp -p {tmp_dir}` && 
+                    samtools idxstats {infile} > $tmp &&
+                    awk 'BEGIN {OFS="\\t"} {print $0,"{name}"}' $tmp > {outfile} &&
                     rm $tmp'''
 
     P.run(statement)
@@ -481,7 +475,7 @@ def mergeContigCounts(infiles, outfile):
 
     infiles = ' '.join(infiles)
     
-    statement = '''cat %(infiles)s > %(outfile)s'''
+    statement = f'''cat {infiles} > {outfile}'''
 
     P.run(statement)
 
@@ -497,7 +491,7 @@ def loadmergeContigCounts(infile, outfile):
 def flagstatBam(infile, outfile):
     '''get samtools flagstats for bams'''
 
-    statement = '''samtools flagstat %(infile)s > %(outfile)s'''
+    statement = f'''samtools flagstat {infile} > {outfile}'''
     
     P.run(statement)
 
@@ -558,12 +552,12 @@ def picardAlignmentSummary(infile, outfile):
     tmp_dir = "$SCRATCH_DIR"
     refSeq = os.path.join(PARAMS["genome_dir"], PARAMS["genome"] + ".fa")
     
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` && 
+    statement = f'''tmp=`mktemp -p {tmp_dir}` && 
                    java -Xms12G -Xmx14G -jar /gfs/apps/bio/picard-tools-2.15.0/picard.jar CollectAlignmentSummaryMetrics
-                     R=%(refSeq)s
-                     I=%(infile)s
+                     R={refSeq}
+                     I={infile}
                      O=$tmp && 
-                   cat $tmp | grep -v "#" > %(outfile)s'''
+                   cat $tmp | grep -v "#" > {outfile}'''
 
     P.run(statement, job_memory="5G", job_threads=3)
 
@@ -592,15 +586,21 @@ def picardInsertSizes(infile, outfile):
     pdf = outfile.replace("Metrics.txt", "Histogram.pdf")
     histogram = outfile.replace("Metrics.txt", "Histogram.txt")
     
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` && 
+    statement = f'''tmp=`mktemp -p {tmp_dir}` && 
                    java -Xms12G -Xmx45G -jar /gfs/apps/bio/picard-tools-2.15.0/picard.jar CollectInsertSizeMetrics
                      TMP_DIR=/gfs/scratch/
-                     I=%(infile)s 
+                     I={infile} 
                      O=$tmp
-                     H=%(pdf)s
+                     H={pdf}
                      M=0.5 && 
-                   cat $tmp | grep -A`wc -l $tmp | tr "[[:blank:]]" "\\n" | head -n 1` "## HISTOGRAM" $tmp | grep -v "#" > %(histogram)s &&
-                   cat $tmp | grep -A 2 "## METRICS CLASS" $tmp | grep -v "#" > %(outfile)s &&
+                   cat $tmp | 
+                     grep -A`wc -l $tmp | 
+                     tr "[[:blank:]]" "\\n" | 
+                     head -n 1` "## HISTOGRAM" $tmp | 
+                     grep -v "#" > {histogram} &&
+                   cat $tmp | 
+                     grep -A 2 "## METRICS CLASS" $tmp | 
+                     grep -v "#" > {outfile} &&
                    rm $tmp'''
 
     
@@ -649,12 +649,12 @@ def macs2Predictd(infile, outfile):
     options = PARAMS["macs2_se_options"]
     outdir = os.path.dirname(outfile)
     
-    statement = '''macs2 predictd 
+    statement = f'''macs2 predictd 
                      --format BAM 
-                     --ifile %(infile)s 
-                     --outdir %(outdir)s 
-                     --verbose 2 %(options)s 
-                     2> %(outfile)s'''
+                     --ifile {infile} 
+                     --outdir {outdir} 
+                     --verbose 2 {options} 
+                     2> {outfile}'''
 
     P.run(statement, job_condaenv="macs2", job_threads=4)
 
@@ -667,12 +667,13 @@ def getFragmentSize(infile, outfile):
     sample = os.path.basename(infile).rstrip(".fragment_size.tsv")
     tmp_dir = "$SCRATCH_DIR"
     
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                   echo %(sample)s `cat %(infile)s | 
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                   echo {sample} `cat {infile} | 
                      grep "# tag size =" | 
                      tr -s " " "\\t" | 
                      awk 'BEGIN {OFS="\\t "} {print $12}'` > $tmp && 
-                   cat $tmp | tr -s " " "\\t" > %(outfile)s &&
+                   cat $tmp | 
+                     tr -s " " "\\t" > {outfile} &&
                    rm $tmp'''
 
     P.run(statement)
@@ -700,16 +701,16 @@ def macs2callpeaks(infile, outfile):
                        --outdir macs2.dir                  
                        --bdg
                        --SPMR
-                       %(options)s 
-                       --treatment %(infile)s 
-                       --name %(name)s 
-                       >& %(outfile)s'''  
+                       {options} 
+                       --treatment {infile} 
+                       --name {name} 
+                       >& {outfile}'''  
 
     else:
         # get macs2 predictd fragment lengths from csvdb
         table = os.path.basename(infile).replace(".fastq.1.gz", ".macs2.fragment_size").replace("-", "_").replace(".", "_")
 
-        query = '''select tag_size from %(table)s ''' % locals()
+        query = f'''select tag_size from {table} '''  
 
         dbh = sqlite3.connect(db)
         cc = dbh.cursor()
@@ -727,10 +728,10 @@ def macs2callpeaks(infile, outfile):
                        --outdir macs2.dir 
                        --bdg
                        --SPMR
-                       %(options)s 
-                       --treatment %(infile)s 
-                       --name %(name)s 
-                       >& %(outfile)s'''  
+                       {options} 
+                       --treatment {infile} 
+                       --name {name} 
+                       >& {outfile}'''  
     
     P.run(statement, job_condaenv="macs2", job_threads=5)
 
@@ -741,7 +742,7 @@ def getChIPblacklist(infile, outfile):
     '''Get Ensembl ChIP blacklisted regions'''
 
     chip_blacklist = PARAMS["peak_filter_chip_blacklist"]
-    statement = '''wget -O %(outfile)s %(chip_blacklist)s'''
+    statement = f'''wget -O {outfile} {chip_blacklist}'''
 
     P.run(statement)
 
@@ -752,7 +753,9 @@ def getATACblacklist(infile, outfile):
     '''Get ATAC blacklist regions'''
 
     atac_blacklist = PARAMS["peak_filter_atac_blacklist"]
-    statement = '''wget -q %(atac_blacklist)s | gzip - > %(outfile)s'''
+    
+    statement = f'''wget -q {atac_blacklist} | 
+                      gzip - > {outfile}'''
 
     P.run(statement)
 
@@ -769,7 +772,12 @@ def filterPeaks(infiles, outfile):
 
     blacklist = ' '.join(blacklists)
     
-    statement = '''intersectBed -wa -v -a %(peak)s -b <(zcat %(blacklist)s ) > %(outfile)s'''
+    statement = f'''intersectBed 
+                      -wa 
+                      -v 
+                      -a {peak} 
+                      -b <(zcat {blacklist} ) 
+                      > {outfile}'''
     
     P.run(statement)
 
@@ -880,14 +888,14 @@ def mergeReplicatePeaks(infiles, outfile):
 #                reps = [x.split("_")[3] for x in peak_id.split(",")] # this is dependent on sample naming...
 
                 # get unique elements from list of replicates by converting to set
-                if len(set(peak_id.split(",")) >= rep_overlaps:
+                if len(set(peak_id.split(","))) >= rep_overlaps:
                     # outfile
                     bed = [contig, start, end, peak_id, peak_score, strand, FC, pval, qval, summit]
                     bed = '\t'.join(bed) + '\n'
 
                     output.write(bed)
 
-    statement = '''rm %(tmp)s'''
+    statement = f'''rm {tmp}'''
 
     P.run(statement)
 
@@ -958,14 +966,14 @@ def hmmratac(infile, outfile):
     
     blacklists = ' '.join(["blacklist_chip.mm10.bed.gz", "blacklist_chip.mm10.bed.gz"])
     
-    statement = '''blacklist=`mktemp -p $SCRATCH_DIR` &&
-                   zcat %(blacklists)s > $blacklist &&
-                   java -Xms20G -Xmx40G -jar %(exe)s 
-                     -b %(infile)s
-                     -i %(index)s
-                     -g %(contigs)s
-                     -o %(name)s
-                     %(options)s
+    statement = f'''blacklist=`mktemp -p $SCRATCH_DIR` &&
+                   zcat {blacklists} > $blacklist &&
+                   java -Xms20G -Xmx40G -jar {exe} 
+                     -b {infile}
+                     -i {index}
+                     -g {contigs}
+                     -o {name}
+                     {options}
                      --blacklist $blacklist &&
                    rm $blacklist'''
 
@@ -1079,19 +1087,19 @@ def FRIPcountBAM(infiles, outfile):
     if bamtools.is_paired(bam):
          # -p flag specifes only to count paired reads
 
-        statement = '''bedtools multicov -p -q 10 -bams %(bam)s 
-                    -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' %(interval)s ) 
-                    > %(outfile)s 
+        statement = f'''bedtools multicov -p -q 10 -bams {bam} 
+                    -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' {interval} ) 
+                    > {outfile} 
                     && sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\ttotal' 
-                    %(outfile)s''' % locals()
+                    {outfile}'''  
 
     else:
 
-         statement = '''bedtools multicov -q 10 -bams %(bam)s 
-                     -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' %(interval)s ) 
-                     > %(outfile)s 
+         statement = f'''bedtools multicov -q 10 -bams {bam} 
+                     -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' {interval} ) 
+                     > {outfile} 
                      && sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\ttotal' 
-                     %(outfile)s''' % locals()
+                     {outfile}'''  
 
     print(statement)
          
@@ -1114,18 +1122,18 @@ def FRIP(infile, outfile):
         bam = "bowtie2.dir/" + sample_name + ".prep.bam"
         
 
-        statement = '''total_reads=`samtools view %(bam)s | 
+        statement = f'''total_reads=`samtools view {bam} | 
                          wc -l` &&
-                       peak_reads=`awk 'BEGIN {OFS="\\t"} 
-                         {sum += $7;} END 
-                         {print sum;}' %(infile)s` &&
-                       awk -v sample=%(sample_label)s 
-                         -v isize=%(size_filt)s
+                       peak_reads=`awk 'BEGIN {{OFS="\\t"}}
+                         {{sum += $7;}} END 
+                         {{print sum;}}' {infile}` &&
+                       awk -v sample={sample_label} 
+                         -v isize={size_filt}
                          -v t_reads=$total_reads
                          -v p_reads=$peak_reads
-                         'BEGIN {print p_reads / t_reads, sample, isize}' | 
+                         'BEGIN {{print p_reads / t_reads, sample, isize}}' | 
                          tr -s "[[:blank:]]" "\\t" 
-                         > %(outfile)s'''
+                         > {outfile}'''
 
         print(statement)
 
@@ -1139,11 +1147,11 @@ def FRIP_table(infiles, outfile):
 
     tmp_dir = "$SCRATCH_DIR"
     
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                   awk 'BEGIN {printf "FRIP\\tsample_id\\tsize_filt\\n"}' > $tmp &&
-                   for i in %(infiles)s; 
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                   awk 'BEGIN {{printf "FRIP\\tsample_id\\tsize_filt\\n"}}' > $tmp &&
+                   for i in {infiles}; 
                      do cat $i >> $tmp; done;
-                   mv $tmp %(outfile)s'''
+                   mv $tmp {outfile}'''
 
     P.run(statement)
 
@@ -1178,14 +1186,14 @@ def mergePeaks(infiles, outfile):
 
     infiles = ' '.join(infiles)
 
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                   cat %(infiles)s | grep -v ^chrUn* - > $tmp &&
-                   awk 'BEGIN {OFS="\\t"} {center = $2 + $10 ; start = center - %(offset)s ; end = center + %(offset)s ;
-                     print $1,start,end,$4,$5}' $tmp | 
-                   awk 'BEGIN {OFS="\\t"} {if (($2 < $3) && ($2 > 0)) print $0}' - |
-                   sort -k1,1 -k2,2n |
-                   mergeBed -c 4,5 -o count,mean -i - |
-                   awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,"merged_peaks_"NR,$5,$4,$3-$2,sprintf("%%i", ($2+$3)/2)}' - > %(outfile)s &&
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                   cat {infiles} | grep -v ^chrUn* - > $tmp &&
+                   awk 'BEGIN {{OFS="\\t"}} {{center = $2 + $10 ; start = center - {offset} ; end = center + {offset} ;
+                     print $1,start,end,$4,$5}}' $tmp | 
+                   awk 'BEGIN {{OFS="\\t"}} {{if (($2 < $3) && ($2 > 0)) print $0}}' - |
+                     sort -k1,1 -k2,2n |
+                     mergeBed -c 4,5 -o count,mean -i - |
+                     awk 'BEGIN {{OFS="\\t"}} {{print $1,$2,$3,"merged_peaks_"NR,$5,$4,$3-$2,sprintf("%%i", ($2+$3)/2)}}' - > {outfile} &&
                    rm $tmp'''
 
     P.run(statement)
@@ -1209,11 +1217,17 @@ def fetchEnsemblGeneset(infile,outfile):
     #                where gi.gene_biotype="protein_coding"
     #             '''
 
-    statement = '''select a.gene_id, a.gene_name, b.contig, b.start, b.end 
+    statement = '''select a.gene_id, a.gene_name, b.contig, min(b.start) as start, max(b.end) as end, b.strand
                      from gene_info a 
-                     inner join geneset_all_gtf b
-                     on a.gene_id = b.gene_id
-                     where gene_biotype = "protein_coding" '''
+                     inner join geneset_all_gtf b 
+                     on a.gene_id = b.gene_id 
+                     where b.gene_biotype = "protein_coding" and b.strand = "+" 
+                     group by b.gene_id 
+                   union 
+                   select a.gene_id, a.gene_name, b.contig, max(b.start) as start, min(b.end) as end, b.strand
+                     from gene_info a 
+                     inner join geneset_all_gtf b on a.gene_id = b.gene_id 
+                     where b.gene_biotype = "protein_coding" and b.strand = "-" group by b.gene_id'''
 
     anndb = os.path.join(PARAMS["annotations_dir"], "csvdb")
 
@@ -1263,9 +1277,10 @@ def filterEnsPromoters(infile,outfile):
     '''Remove unwanted chromosomes & correct contig column, "chrchr" -> "chr"'''
 
     tmp_dir = "$SCRATCH_DIR"
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` && 
-                sed 's/chrchr/chr/' %(infile)s > $tmp &&
-                grep -v ^chrM $tmp > %(outfile)s && rm $tmp'''
+    statement = f'''tmp=`mktemp -p {tmp_dir}` && 
+                    sed 's/chrchr/chr/' {infile} > $tmp &&
+                    grep -v ^chrM $tmp > {outfile} && 
+                    rm $tmp'''
 
     P.run(statement)
 
@@ -1292,8 +1307,12 @@ def regulatedGenes(infiles,outfile):
     infile, greatPromoters = infiles
 
     # intersect infiles with great gene annotation beds to get peak associated genes
-    statement = '''intersectBed -wa -wb -a <(cut -f1-8 %(infile)s) -b %(greatPromoters)s 
-                | cut -f1-8,12 > %(outfile)s''' % locals()
+    statement = f'''intersectBed 
+                      -wa 
+                      -wb 
+                      -a <(cut -f1-8 {infile}) 
+                      -b {greatPromoters} | 
+                      cut -f1-8,12 > {outfile}'''  
 
     # Filter on nearest peak 2 gene later
 
@@ -1315,17 +1334,16 @@ def regulatedTables(infiles, outfile):
     
     regulated, great, ensGenes = [ P.to_table(x) for x in infiles ]
 
-    query = '''select distinct r.contig,
+    query = f'''select distinct r.contig,
                   r.start, r.end, r.peak_id, r.peak_score,
                   r.no_peaks, r.peak_width, r.peak_centre,
                   g.gene_id, e.gene_name, e.strand,
                   e.start, e.end
-                  from %s as r
-                  inner join %s as g
+                  from {regulated} as r
+                  inner join {great} as g
                      on g.gene_id = r.gene_id 
-                  inner join %s as e
-                     on g.gene_id = e.gene_id
-                  ''' % (regulated, great, ensGenes)
+                  inner join {ensGenes} as e
+                     on g.gene_id = e.gene_id'''
 
     dbh = sqlite3.connect(db)
     cc = dbh.cursor()
@@ -1361,13 +1379,14 @@ def regulatedTables(infiles, outfile):
 
     # get closest genes 2 peaks, 1 gene per peak
     tmp_dir = "$SCRATCH_DIR"
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                tail -n +2 %(sql_table)s  | sed 's/-//g' 
-                | awk 'BEGIN {OFS="\\t"} {print $4,$5,$6,$7,$8,$9,$10,$1,$2,$3}' 
-                | sort -k8,8 -k9,9n -k7,7n 
-                | cat | uniq -f7 > $tmp 
-                && awk 'BEGIN {OFS="\\t"} {print $8,$9,$10,$1,$2,$3,$4,$5,$6,$7}' $tmp 
-                > %(outfile)s  && rm %(sql_table)s $tmp''' % locals()
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                    tail -n +2 {sql_table}  | sed 's/-//g' | 
+                      awk 'BEGIN {{OFS="\\t"}} {{print $4,$5,$6,$7,$8,$9,$10,$1,$2,$3}}' |
+                      sort -k8,8 -k9,9n -k7,7n |
+                      cat | 
+                      uniq -f7 > $tmp && 
+                    awk 'BEGIN {{OFS="\\t"}} {{print $8,$9,$10,$1,$2,$3,$4,$5,$6,$7}}' $tmp > {outfile}  && 
+                    rm {sql_table} $tmp'''
 
     P.run(statement)
 
@@ -1393,7 +1412,7 @@ def great():
 def indexBAM(infile, outfile):
     '''Index input BAM files'''
 
-    statement = '''samtools index %(infile)s %(outfile)s'''
+    statement = f'''samtools index {infile} {outfile}'''
 
     P.run(statement)
 
@@ -1433,18 +1452,25 @@ def scoreIntervalsBAM(infiles, outfile):
     tmp_dir = "$SCRATCH_DIR"
     
     if bamtools.is_paired(bam):
-        statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                       cut -f1-7,9 %(interval)s > $tmp &&
-                       bedtools multicov -p -q 10 -bams %(bam)s -bed $tmp > %(outfile)s &&
-                       sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\tpeak_center\\tgene_id\\ttotal' %(outfile)s &&
-                       rm $tmp''' % locals()
+        statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                        cut -f1-7,9 {interval} > $tmp &&
+                        bedtools multicov 
+                          -p 
+                          -q 10 
+                          -bams {bam} 
+                          -bed $tmp > {outfile} &&
+                        sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\tpeak_center\\tgene_id\\ttotal' {outfile} &&
+                        rm $tmp'''  
         
     else:
-         statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                        cut -f1-7,9 %(interval)s > $tmp &&
-                        bedtools multicov -q 10 -bams %(bam)s -bed $tmp > %(outfile)s && 
-                        sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\tpeak_center\\tgene_id\\ttotal' %(outfile)s &&
-                        rm $tmp''' % locals()
+         statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                         cut -f1-7,9 {interval} > $tmp &&
+                         bedtools multicov 
+                          -q 10 
+                          -bams {bam} 
+                          -bed $tmp > {outfile} && 
+                         sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\tpeak_center\\tgene_id\\ttotal' {outfile} &&
+                         rm $tmp'''  
 
     P.run(statement)
 
@@ -1458,15 +1484,15 @@ def normaliseBAMcounts(infile, outfile):
     counts = pd.read_csv(infile, sep="\t", header=0)
 
     if "size_filt" in infile:
-        name = os.path.basename(infile).replace("_counts.txt", "").replace(".", "_").lstrip("merged_peaks_GREAT_")
+        name = os.path.basename(infile).replace("_counts.txt", "").replace(".", "_").replace("merged_peaks_GREAT_", "")
     else:
-        name = os.path.basename(infile).rstrip(".counts.txt").split(".")[-1] + "prep"
+        name = os.path.basename(infile).replace(".counts.txt", "").split(".")[-1] + "prep"
         
 
     if Unpaired == False:
-        query = '''select properly_paired/2 as total from flagstats where QC_status = "pass" and sample_id = "%(name)s" ''' % locals()
+        query = f'''select properly_paired/2 as total from flagstats where QC_status = "pass" and sample_id = "{name}" '''  
     else:
-        query = '''select mapped as total from flagstats where QC_status = "pass" and sample_id = "%(name)s" ''' % locals()
+        query = f'''select mapped as total from flagstats where QC_status = "pass" and sample_id = "{name}" '''  
 
     total_counts = fetch_DataFrame(query, db)
 
@@ -1490,10 +1516,13 @@ def mergeNormCounts(infiles, outfile):
     infiles = ' '.join(infiles)
 
     tmp_dir = "$SCRATCH_DIR"
-    statement = '''tmp=`mktemp -p %(tmp_dir)s` &&
-                   head -n 1 %(head)s >  $tmp &&
-                   for i in %(infiles)s; do tail -n +2 $i >> $tmp; done;
-                   mv $tmp %(outfile)s'''
+
+    statement = f'''tmp=`mktemp -p {tmp_dir}` &&
+                    head -n 1 {head} >  $tmp &&
+                    for i in {infiles}; 
+                      do tail -n +2 $i >> $tmp; 
+                      done;
+                    mv $tmp {outfile}'''
     
     P.run(statement)
     
@@ -1517,7 +1546,7 @@ def count():
 def indexPrepBam(infile, outfile):
     '''samtools index bam'''
 
-    statement = '''samtools index -b %(infile)s %(outfile)s'''
+    statement = f'''samtools index -b {infile} {outfile}'''
 
     P.run(statement)
 
@@ -1533,25 +1562,29 @@ def bamCoverage(infile, outfile):
 
         # PE reads filtered on sam flag 66 -> include only first read in properly mapped pairs
         
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsing RPKM
-                    --samFlagInclude 66
-                    -p "max"'''
+        statement = f'''bamCoverage 
+                          -b {infile} 
+                          -o {outfile}
+                          --binSize 5
+                          --smoothLength 20
+                          --centerReads
+                          --normalizeUsing RPKM
+                          --samFlagInclude 66
+                          -p "max"'''
         
     else:
 
         # SE reads filtered on sam flag 4 -> exclude unmapped reads
         
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsing RPKM
-                    --samFlagExclude 4
-                    -p "max"'''
+        statement = f'''bamCoverage 
+                          -b {infile} 
+                          -o {outfile}
+                          --binSize 5
+                          --smoothLength 20
+                          --centerReads
+                          --normalizeUsing RPKM
+                          --samFlagExclude 4
+                          -p "max"'''
 
     # added smoothLength = 20 to try and get better looking plots...
     # --minMappingQuality 10 optional argument, but unnecessary as bams are alredy filtered
@@ -1580,19 +1613,21 @@ def bamCoverage_mononuc(infile, outfile):
 
     if bamtools.is_paired(infile):
         
-        statement = '''bamCoverage -b %(infile)s -o %(outfile)s
-                    --binSize 5
-                    --minFragmentLength 150
-                    --maxFragmentLength 300
-                    --smoothLength 20
-                    --centerReads
-                    --normalizeUsing RPKM
-                    --samFlagInclude 66
-                    -p "max"'''
+        statement = f'''bamCoverage 
+                          -b {infile} 
+                          -o {outfile}
+                          --binSize 5
+                          --minFragmentLength 150
+                          --maxFragmentLength 300
+                          --smoothLength 20
+                          --centerReads
+                          --normalizeUsing RPKM
+                          --samFlagInclude 66
+                          -p "max"'''
         
     else:
         
-        statement = '''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > %(outfile)'''
+        statement = f'''echo "Error - BAM must be PE to use --maxFragmentLength parameter" > {outfile}'''
     
     P.run(statement, job_memory="2G", job_threads=20)
 
@@ -1657,16 +1692,16 @@ def TSSmatrix(infiles, outfiles):
 
         outfile = outfiles[c]
         
-        statement = '''computeMatrix reference-point
-                         -S %(job)s
-                         -R %(bed)s
-                         --missingDataAsZero
-                         -bs 10
-                         -a 2500
-                         -b 2500
-                         -p "max"
-                         --samplesLabel %(names)s
-                         -out %(outfile)s'''
+        statement = f'''computeMatrix reference-point
+                          -S {job}
+                          -R {bed}
+                          --missingDataAsZero
+                          -bs 10
+                          -a 2500
+                          -b 2500
+                          -p "max"
+                          --samplesLabel {names}
+                          -out {outfile}'''
 
         P.run(statement)
 
@@ -1693,13 +1728,13 @@ def TSSprofile(infiles, outfiles):
         
         outfile = outfiles[c]
         
-        statement = '''plotProfile
-                           -m %(infile)s
-                           %(opts)s
-                           --plotTitle "%(title)s"
+        statement = f'''plotProfile
+                           -m {infile}
+                           {opts}
+                           --plotTitle "{title}"
                            --regionsLabel ""
                            --yAxisLabel "ATAC signal (RPKM)"
-                           -out %(outfile)s'''
+                           -out {outfile}'''
 
         P.run(statement)
 
@@ -1722,14 +1757,14 @@ def TSSheatmap(infiles, outfiles):
         
         outfile = outfiles[c]
         
-        statement = '''plotHeatmap
-                           -m %(infile)s
-                           --plotTitle "%(title)s"
+        statement = f'''plotHeatmap
+                           -m {infile}
+                           --plotTitle "{title}"
                            --regionsLabel ""
                            --xAxisLabel ""
                            --yAxisLabel "ATAC signal (RPKM)"
                            --heatmapHeight 10
-                           -out %(outfile)s'''
+                           -out {outfile}'''
 
         P.run(statement)
 
@@ -1757,17 +1792,17 @@ def report(infile, outfile):
         nbconvert = infile.replace(".ipynb", ".nbconvert.ipynb")
         tmp = os.path.basename(template)
     
-        statement = '''cp %(template)s .  &&
+        statement = f'''cp {template} .  &&
                    jupyter nbconvert 
                      --to notebook 
                      --allow-errors 
                      --ExecutePreprocessor.timeout=360
-                     --execute %(infile)s && 
+                     --execute {infile} && 
                    jupyter nbconvert 
                      --to html 
                      --ExecutePreprocessor.timeout=360
-                     --execute %(nbconvert)s &&
-                   rm %(tmp)s'''
+                     --execute {nbconvert} &&
+                   rm {tmp}'''
 
         P. run()
     
