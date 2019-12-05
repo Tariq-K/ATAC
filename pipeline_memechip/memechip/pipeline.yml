@@ -90,8 +90,8 @@ annotations:
 report:
     # path to Jupyter .ipynb template(s).  
     path:
-        - ~/devel/my_scripts/git_repo/pipeline_memechip/MEME_ChIP_Pipeline_Report_MEME.ipynb
-	- ~/devel/my_scripts/git_repo/pipeline_memechip/MEME_ChIP_Pipeline_Report_DREME.ipynb
+        - ~/devel/my_scripts/git_repo/pipeline_memechip/reports/MEME_ChIP_Pipeline_Report_MEME.ipynb
+	- ~/devel/my_scripts/git_repo/pipeline_memechip/reports/MEME_ChIP_Pipeline_Report_DREME.ipynb
 
 
 

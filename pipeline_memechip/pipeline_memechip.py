@@ -591,7 +591,7 @@ def annotatePeaks(infile, outfile):
 def homerMotifEnrichmentPlot(infile, outfile):
     '''Process results from annotatePeaks and plot motif enrichment relative to peaks'''
 
-    statement = f'''python motifPlot.py 
+    statement = f'''python python/motifPlot.py 
                       {infile} 
                       {outfile}'''
 
