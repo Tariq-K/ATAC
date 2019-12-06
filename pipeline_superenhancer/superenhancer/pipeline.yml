@@ -1,0 +1,31 @@
+## pipeline_superenhancer options
+
+# dir for tmp files
+tmpdir: $SCRATCH_DIR
+
+# the genome to use (UCSC convention)
+genome: mm10
+
+annotations:
+    database: /gfs/mirror/annotations/mm10_ensembl91/csvdb
+
+    # directory with annotation information
+    dir: /gfs/mirror/annotations/mm10_ensembl91/
+
+    # chrom sizes file (chromosome, size)
+    chrom_sizes: /gfs/mirror/annotations/mm10_ensembl91/assembly.dir/contigs.tsv
+
+great:
+    # extend basal domain up and down (bp)
+    basal_up: 5000
+    basal_down: 1000
+
+    # maximum extension (bp)
+    max: 1000000
+
+    # restrict extensions to half way to the nearest gene (False|True)
+    half: False
+
+superenhancer:
+    merge_dist: 12500
+
