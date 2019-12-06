@@ -1,5 +1,13 @@
 # ignore temporary files from emacs
 *~
+'#*#'
+#*#
 
 # ignore checkpoint folder from jupyter notebooks
 .ipynb_checkpoints/
+
+# python 3
+*.pyc
+*.pyo
+*.pc
+__pycache__
