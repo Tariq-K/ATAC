@@ -91,7 +91,7 @@ great:
 
 report:
     # path to Jupyter .ipynb template(s). "," seperated list
-    path: ~/devel/my_scripts/git_repo/pipeline_atac/ATAC_Pipeline_Report.ipynb,~/devel/my_scripts/git_repo/pipeline_atac/ATAC_Pipeline_DESeq2.ipynb
+    path: <PATH>/pipeline_atac/reports/ATAC_Pipeline_Report.ipynb,<PATH>/pipeline_atac/reports/ATAC_Pipeline_DESeq2.ipynb
 
 
 
