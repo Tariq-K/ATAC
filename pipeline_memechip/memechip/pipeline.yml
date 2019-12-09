@@ -4,9 +4,6 @@ genome: mm10
 # location of indexed genome
 genome_dir: /gfs/mirror/genomes/plain
 
-# name of database
-database: csvdb
-
 # database options for csv2db script
 csv2db_options: --backend=sqlite --retry --map=gene_id:str --map=contig:str --map=transcript_id:str 
 
