@@ -1,3 +1,18 @@
+from cgatcore import pipeline as P
+import os
+import re
+
+# Pipeline configuration
+P.get_parameters(
+		 ["%s/pipeline.yml" % os.path.splitext(__file__)[0],
+		  "../pipeline.yml",
+		  "pipeline.yml"],
+		 )
+
+PARAMS = P.PARAMS
+
+db = PARAMS['database']['url'].split('./')[1]
+
 #####################################################
 ####              Helper functions               ####
 #####################################################

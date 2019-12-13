@@ -69,6 +69,7 @@ from cgat.BamTools import bamtools
 import sys
 import os
 import sqlite3
+
 import re
 import glob
 import gzip
@@ -291,7 +292,7 @@ def contigReadCounts(infile, outfile):
     
     statement =  f'''tmp=`mktemp -p {tmp_dir}` && 
                     samtools idxstats {infile} > $tmp &&
-                    awk 'BEGIN {{OFS="\\t"}} {{print $0,"{name}"}}' $tmp > {outfile} &&
+                    awk 'BEGIN {OFS="\\t"} {print $0,"{name}"}' $tmp > {outfile} &&
                     rm $tmp'''
 
     P.run(statement)
@@ -499,7 +500,7 @@ def getFragmentSize(infile, outfile):
                    echo {sample} `cat {infile} | 
                      grep "# tag size =" | 
                      tr -s " " "\\t" | 
-                     awk 'BEGIN {{OFS="\\t "}} {{print $12}}'` > $tmp && 
+                     awk 'BEGIN {OFS="\\t "} {print $12}'` > $tmp && 
                    cat $tmp | 
                      tr -s " " "\\t" > {outfile} &&
                    rm $tmp'''
@@ -916,7 +917,7 @@ def FRIPcountBAM(infiles, outfile):
          # -p flag specifes only to count paired reads
 
         statement = f'''bedtools multicov -p -q 10 -bams {bam} 
-                    -bed <( awk 'BEGIN {{OFS="\\t"}} {{print $1,$2,$3,$4,$5,$3-$2}}' {interval} ) 
+                    -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' {interval} ) 
                     > {outfile} 
                     && sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\ttotal' 
                     {outfile}'''  
@@ -924,10 +925,10 @@ def FRIPcountBAM(infiles, outfile):
     else:
 
          statement = f'''bedtools multicov -q 10 -bams {bam} 
-                     -bed <( awk 'BEGIN {{OFS="\\t"}} {{print $1,$2,$3,$4,$5,$3-$2}}' {interval} ) 
+                     -bed <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,$3-$2}' {interval} ) 
                      > {outfile} 
                      && sed -i '1i \chromosome\\tstart\\tend\\tpeak_id\\tpeak_score\\tpeak_width\\ttotal' 
-                     {outfile} '''  
+                     {outfile}'''  
 
     print(statement)
          
