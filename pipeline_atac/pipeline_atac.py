@@ -525,14 +525,14 @@ def macs2callpeaks(infile, outfile):
         options = PARAMS["macs2_pe_options"]
         name = os.path.basename(outfile).replace(".macs2.log", "")
         
-        statement='''macs2 callpeak 
-                       --outdir macs2.dir                  
-                       --bdg
-                       --SPMR
-                       {options} 
-                       --treatment {infile} 
-                       --name {name} 
-                       >& {outfile}'''  
+        statement = f'''macs2 callpeak 
+                          --outdir macs2.dir                  
+                          --bdg
+                          --SPMR
+                          {options} 
+                          --treatment {infile} 
+                          --name {name} 
+                          >& {outfile}'''  
 
     else:
         # get macs2 predictd fragment lengths from csvdb
@@ -552,14 +552,14 @@ def macs2callpeaks(infile, outfile):
         name = os.path.basename(outfile).split(".")[0]
         tmp_dir = "$SCRATCH_DIR"
 
-        statement='''macs2 callpeak 
-                       --outdir macs2.dir 
-                       --bdg
-                       --SPMR
-                       {options} 
-                       --treatment {infile} 
-                       --name {name} 
-                       >& {outfile}'''  
+        statement = f'''macs2 callpeak 
+                          --outdir macs2.dir 
+                          --bdg
+                          --SPMR
+                          {options} 
+                          --treatment {infile} 
+                          --name {name} 
+                          >& {outfile}'''  
     
     P.run(statement, job_condaenv="macs2", job_threads=5)
 
@@ -728,7 +728,7 @@ def mergeReplicatePeaks(infiles, outfile):
     P.run(statement)
 
 
-@follows(mergeReplicatePeaks)
+#@follows(mergeReplicatePeaks)
 @files(None, "macs2.dir/no_peaks.txt")
 def countPeaks(infiles, outfile):
 
@@ -1304,28 +1304,29 @@ def scoreIntervalsBAM(infiles, outfile):
 
     
 @transform(scoreIntervalsBAM,
-           regex(r"(.*).counts.txt"),
+           regex(r"(.*)_counts.txt"),
            r"\1_norm_counts.txt")
 def normaliseBAMcounts(infile, outfile):
     '''normalise BAM counts for file size'''
-       
+
+    # write this as a script and submit job to cluster
+    
     counts = pd.read_csv(infile, sep="\t", header=0)
 
     if "size_filt" in infile:
         name = os.path.basename(infile).replace("_counts.txt", "").replace(".", "_").replace("merged_peaks_GREAT_", "")
     else:
-        name = os.path.basename(infile).replace(".counts.txt", "").split(".")[-1] + "prep"
+        name = os.path.basename(infile).replace("counts.txt", "").split(".")[-1] + "prep"
         
 
     if Unpaired == False:
-        query = f'''select properly_paired/2 as total from flagstats where QC_status = "pass" and sample_id = "{name}" '''  
+        query = f'''select (properly_paired/2)/1E06 as total from flagstats where QC_status = "pass" and sample_id = "{name}" '''  
     else:
-        query = f'''select mapped as total from flagstats where QC_status = "pass" and sample_id = "{name}" '''  
+        query = f'''select mapped/1E06 as total from flagstats where QC_status = "pass" and sample_id = "{name}" '''  
 
     total_counts = A.fetch_DataFrame(query, db)
-
-    norm_factor = float(total_counts["total"])/1000000 # total_counts/1x10^6
-
+    norm_factor = total_counts["total"]
+    
     counts["RPM"] = counts["total"].apply(lambda x: x/norm_factor)
     counts["RPM_width_norm"] = counts.apply(lambda x: x.RPM/x.peak_width if x.peak_width > 0 else x.RPM/1, axis=1)
     counts["sample_id"] = name.rstrip("_prep")

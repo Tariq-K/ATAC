@@ -1,6 +1,9 @@
 from cgatcore import pipeline as P
 import os
+import sqlite3
 import re
+import pandas as pd
+import gzip
 
 # Pipeline configuration
 P.get_parameters(
