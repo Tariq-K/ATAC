@@ -58,7 +58,7 @@ PARAMS = P.PARAMS
 
 
 db = PARAMS['database']['url'].split('./')[1]
-
+tmp_dir = PARAMS['tmp_dir']
 
 def connect():
     '''connect to database.
@@ -94,15 +94,6 @@ def fetchEnsemblGeneset(infile,outfile):
         the great gene set: For that we would only want protein coding genes with
         GO annotations '''
 
-    # statement = '''select count(gene_id) from (select gi.gene_id, gi.gene_name,
-    #                       gs.contig, gs.start, gs.end, gs.strand
-    #                from gene_info gi
-    #                inner join gene_stats gs
-    #                on gi.gene_id=gs.gene_id
-    #                where gi.gene_biotype="protein_coding")
-    #             '''
-
-    # new annotations do not have gene_stats col
     # removed error causing row duplications, now statement retrieves max size transcript per gene_id
 
     statement = '''select a.gene_id, a.gene_name, b.contig, min(b.start) as start, max(b.end) as end, b.strand
@@ -134,14 +125,15 @@ def uploadEnsGenes(infile,outfile):
            regex(r"(.*).txt"),
            r"\1.bed")
 def getAllGenesBed(infile, outfile):
-    '''Make bed file of all Ensembl protein coding genes'''
+    '''Make bed file of all Ensembl protein coding genes. 
+       Remove strand info and correct so start < end for bedTools'''
 
-    tmp_dir = PARAMS["tmpdir"]
-    
     statement = f'''tmp=`mktemp -p {tmp_dir}` &&
                    awk 
-                     'BEGIN {{OFS="\\t"}} {{print $3,$4,$5,$1,0,$6}}' 
-                     {infile} 
+                     'BEGIN {{OFS="\\t"}} 
+                     {{if ($6 == "-" && $5 < $4) print $3,$5,$4,$1,0 ; 
+                     else if ($6 == "+" && $4 < $5) print $3,$4,$5,$1,0 ;}}'
+                     <( grep "^ENS" {infile} )
                      > $tmp &&
                    tail -n +2 $tmp | 
                      sort -u | 
@@ -278,7 +270,7 @@ def loadRegulatedGenes(infile, outfile):
 def regulatedTables(infiles, outfile):
     '''Make an informative table about peaks and "regulated" genes'''
     
-    regulated, great, ensGenes = [ P.toTable(x) for x in infiles ]
+    regulated, great, ensGenes = [ P.to_table(x) for x in infiles ]
 
     query = f'''select distinct r.contig,
                   r.pstart, r.pend, r.peak_id, r.peak_score,
@@ -321,8 +313,6 @@ def regulatedTables(infiles, outfile):
     o.close()
 
     # get closest genes 2 peaks, 1 gene per peak
-    tmp_dir = PARAMS["tmpdir"]
-    
     statement = f'''tmp=`mktemp -p {tmp_dir}` &&
                     tail -n +2 {tmp} | 
                       awk 'BEGIN {{OFS="\\t"}} {{print $4,$5,$6,$7,$8,$9,$10,$11,$12,$1,$2,$3,$13}}' | 
@@ -403,11 +393,11 @@ def getEnhancers(infile, outfile):
     # use awk to filter out peaks adjacent to TSSs:
     statement = f'''cat <(tail -n +2 {tmp} ) | 
                       awk 'BEGIN {{OFS="\\t"}} {{if ($6 > 2500 || $6 < -2500) print $0}}' - | 
-                      sort -k1,1 -k2,2n) |
+                      sort -k1,1 -k2,2n - |
                       awk 'BEGIN {{OFS="\\t"}} {{print $1,$2,$3,$4,$5,$3-$2}}' - 
                       > {outfile} &&
                       rm {tmp} '''
-    
+
     # cols: chr, start, end, p_id, score, width, no. peaks in region
     
     P.run(statement)
@@ -444,7 +434,7 @@ def getPromoterPeaks(infile, outfile):
 
     statement = f'''awk 'BEGIN {{OFS="\\t"}} {{if ($6 < 2500) print $1,$2,$3,$4,$5,$3-$2}}' 
                      <(sed 's/-//g' {tmp} ) 
-                     > {outfile}
+                     > {outfile} &&
                      rm {tmp}'''
 
     P.run(statement)
@@ -478,18 +468,24 @@ def filterEnhancersAgainstPromotersGenerator():
 @files(filterEnhancersAgainstPromotersGenerator)
 def filterEnhancersAgainstPromoters(infiles, outfile):
     '''Filter ATAC enhancer peaks against ATAC promoter peaks to ensure there is no overlap.
-       Also, filter against genes'''
+       Also, filter against genes and insulators'''
 
     enhancers, promoters = infiles
     genes = glob.glob("annotations.dir/ensemblGeneset.bed")
     genes = ' '.join(genes)
-    
-    statement = '''intersectBed 
-                     -v 
-                     -a <(sort -k1,1 -k2,2n %(enhancers)s ) 
-                     -b <(cat %(promoters)s %(genes)s | sort -k1,1 -k2,2n ) 
-                     > %(outfile)s'''
 
+    statement = []
+    statement.append(f'''intersectBed -v -a <(sort -k1,1 -k2,2n {enhancers} )''')
+    
+    insulators = PARAMS["superenhancer_insulators"]
+    
+    if insulators != None:
+        statement.append(f'''-b <(cat {promoters} {genes} {insulators} | sort -k1,1 -k2,2n | cut -f1-5) > {outfile}''')
+    else:
+        statement.append(f'''-b <(cat {promoters} {genes} | sort -k1,1 -k2,2n | cut -f1-5) > {outfile}''')
+        
+    statement = ' '.join(statement)
+    
     P.run(statement)
 
     
@@ -523,17 +519,22 @@ def mergeEnhancers(infile, outfile):
            add_inputs("annotations.dir/ensemblGeneset.bed"),
            r"\1.bed")
 def filterEnhancersAgainstGenes(infiles, outfile):
-    '''subtract any regions spanning genes from enhancer merged peaks'''
+    '''subtract any regions spanning genes and insulators from enhancer merged peaks'''
 
     enhancers, genes = infiles
-    
-    statement = f'''intersectBed 
-                      -v 
-                      -a <(sort -k1,1 -k2,2n {enhancers}) 
-                      -b <(cut -f1-3 {genes} | 
-                      sort -k1,1 -k2,2n) 
-                      > {outfile}'''
 
+    statement = []
+    statement.append(f'''intersectBed -v -a <(sort -k1,1 -k2,2n {enhancers} )''')
+
+    insulators = PARAMS["superenhancer_insulators"]
+    
+    if insulators != None:
+        statement.append(f'''-b <( cat {genes} {insulators} | cut -f 1-3 | sort -k1,1 -k2,2n ) > {outfile}''')
+    else:
+        statement.append(f'''-b <( cut -f1-3 {genes} | sort -k1,1 -k2,2n ) > {outfile}''')
+
+    statement = ' '.join(statement)
+    
     P.run(statement)
 
     
@@ -542,6 +543,7 @@ def load12kbEnhancers(infile, outfile):
     P.load(infile, outfile, options='-H "contig,start,end,peak_id,mean_score,width,peak_no" -i "peak_id"' ) 
 
 
+@follows(load12kbEnhancers)
 @transform("interval_beds/ENHANCERSmerged_*.bed",
            regex(r"interval_beds/ENHANCERSmerged_(.*).bed"),
            r"interval_beds/REGULATORYFEATURES_\1.bed")
@@ -587,7 +589,7 @@ def generate_scoreIntervalsBAM_jobs():
                yield ( [ [interval, bam], output ] )
 
                
-@follows(load12kbEnhancers, mkdir("BAM_counts.dir/"))
+@follows(regulatoryFeatures, mkdir("BAM_counts.dir/"))
 @files(generate_scoreIntervalsBAM_jobs)
 def scoreIntervalsBAM(infiles, outfile):
     '''Count reads in bed intervals'''
@@ -596,7 +598,7 @@ def scoreIntervalsBAM(infiles, outfile):
 
     tmp_file = bam.replace(".merge.bam", ".tmp")
     
-    if bamtools.isPaired(bam):
+    if bamtools.is_paired(bam):
         # -p flag specifes only to count paired reads
         options = "-p"
         
@@ -637,11 +639,11 @@ def generator_BAMtotalcounts():
 def BAMtotalcounts(infile, outfile):
     '''Count total reads in BAM for normalisation'''
 
-    if bamtools.isPaired(infile):
+    if bamtools.is_paired(infile):
         statement = f'''samtools view -f 2 {infile} | wc -l | awk 'BEGIN {{OFS="\\t"}} {{print $0/2}}' > {outfile}''' 
         # count only reads mapped in proper pairs
     else:
-        statement = '''samtools view -F 4 {infile} | wc -l  | awk 'BEGIN {{OFS="\\t"}} {{print $0}}' > {outfile}''' 
+        statement = f'''samtools view -F 4 {infile} | wc -l  | awk 'BEGIN {{OFS="\\t"}} {{print $0}}' > {outfile}''' 
         # exclude unmapped reads
 
     P.run(statement)
@@ -741,160 +743,57 @@ def readCounts():
     pass
 
 
-# @follows(readCounts)
-# @transform("BAM_counts.dir/*.norm_counts.load",
-#            regex(r"BAM_counts.dir/(.*).norm_counts.load"),
-#            r"\1.mergedEnhancerCounts.bed")
-# def getSEbeds(infile, outfile):
-#     '''Get bed files of 12.5kb enhancer merged peaks with ATAC 
-#     read density in 7th column for get-SuperEnhancers.R script'''
+@follows(loadnormaliseBAMcounts, mkdir("superenhancer.dir"))
+@subdivide(loadnormaliseBAMcounts,
+           regex("BAM_counts.dir/(.*).norm_counts.load"),
+           [r"superenhancer.dir/\1.*.bed", r"superenhancer.dir/\1.*.pdf"])
+def runSuperEnhancerRScript(infile, outfiles):
+    '''run Rscript to calculate SE cutoff
+    and output bed files of super and normal enhnacers, & QC plots'''
 
-#     counts_table = os.path.basename(infile)[:-len(".load")].replace(".", "_")
-#     interval_table = "ENHANCERSmerged_" + counts_table.replace("_norm_counts", "")
+    sample_name = os.path.basename(infile).split(".")[0]
+    script = ''.join([PARAMS["pipeline_dir"], "R/superenhancer.R"])
     
-#     # get db data
-#     query = '''select a.contig, a.start, a.end, a.peak_id, b.peak_no, a.RPM_width_norm 
-#                  from %(counts_table)s a 
-#                  inner join %(interval_table)s b 
-#                  on a.peak_id= b.peak_id''' % locals()
+    statement = f'''Rscript {script}
+                      --sample {sample_name}
+                      --database {db}'''
 
-#     dbh = sqlite3.connect(PARAMS["database"])
-#     cc = dbh.cursor()
-#     sqlresult = cc.execute(query).fetchall()
-#     cc.close()
-
-#     # convert to df & write file
-#     tmp = outfile + "_tmp"
-    
-#     o = open(tmp, "w")
-
-#     for r in sqlresult:
-#         contig, start, end, p_id, peak_no, norm_counts = r[0:6]
-
-#         strand = "."
-
-#         columns = [str(x) for x in [
-#             contig, start, end, p_id, peak_no, norm_counts ] ]
-
-#         o.write("\t".join ( columns ) + "\n")
-#     o.close()
-
-#     statement = '''intersectBed
-#                      -wa
-#                      -wb
-#                      -a <( awk 'BEGIN {OFS="\\t"} {print $1,$2,$3,$4,$5,".",$6}' %(tmp)s )
-#                      -b %(greatPromoters)s |
-#                    cut -f1-7,11
-#                      > %(outfile)s ; checkpoint;
-#                      rm %(tmp)s''' # statement incomplete
-#     P.run()
+    P.run(statement)
 
     
-# @follows(getSEbeds)
-# @transform("*.bed",
-#            regex(r"(.*).bed"),
-#            add_inputs("greatBeds.dir/ens_great.bed"),
-#            r"\1_annotated.bed")
-# def annotateEnhancers(infiles,outfile):
-#     '''Used intersectBed and the great promoters to find regulated Genes'''
+@follows(runSuperEnhancerRScript)
+@subdivide("interval_beds/ENHANCERS_*.bed",
+           regex("interval_beds/ENHANCERS_(.*).bed"),
+           add_inputs(r"superenhancer.dir/\1.superenhancers.bed",
+                       r"superenhancer.dir/\1.enhancers.bed"),
+           [r"superenhancer.dir/\1.superenhancer_peaks.bed",
+            r"superenhancer.dir/\1.enhancer_peaks.bed"])
+def getSEpeaks(infiles, outfiles):
+    '''get individual ATAC enhancer peaks from within merged features'''
 
-#     infile, greatPromoters = infiles
+    peaks, se, e = infiles
 
-#     statement = '''intersectBed 
-#                      -wa 
-#                      -wb 
-#                      -a <(cut -f1-7 %(infile)s) 
-#                      -b %(greatPromoters)s | 
-#                      cut -f1-7,11 
-#                      > %(outfile)s''' 
+    se_peaks, e_peaks = outfiles
 
-#     P.run()
+    statement = f'''intersectBed
+                      -a {peaks}
+                      -b {se}
+                      > {se_peaks}
+                     &&
+                     intersectBed
+                       -a {peaks}
+                       -b {e}
+                       > {e_peaks}'''
 
+    print(statement)
 
-# @transform(annotateEnhancers,
-#            regex(r"(.*).bed"),
-#            r"\1.load")
-# def loadannotateEnhancers(infile, outfile):
-#     '''Load the regulated genes'''
+    P.run(statement)
 
-#     P.load(infile, outfile, 
-#            options='-H "contig,start,end,enhancer_id,no_atac_peaks,strand,ATAC_RPM,gene_id" -i "enhancer_id"')
 
     
-# @transform(loadannotateEnhancers,
-#            suffix(r".load"),
-#            add_inputs(uploadEnsGenes),
-#            r"_table.txt")
-# def enhancerTables(infiles, outfile):
-#     '''Make an informative table about peaks and "regulated" genes'''
-#     regulated, ensGenes = [ P.toTable(x) for x in infiles ]
-
-#     query = '''select distinct r.contig,
-#                   r.start, r.end, r.enhancer_id,
-#                   r.no_atac_peaks, r.strand, r.ATAC_RPM,
-#                   e.gene_name, e.start, e.end, e.strand
-#                   from %s as r
-#                   inner join %s as e
-#                      on r.gene_id = e.gene_id
-#                   ''' % (regulated, ensGenes)
-
-#     print(query)
-    
-#     dbh = sqlite3.connect(PARAMS["database"])
-#     cc = dbh.cursor()
-#     sqlresult = cc.execute(query).fetchall()
-
-#     tmp = outfile + "_tmp"
-    
-#     o = open(tmp,"w")
-#     o.write("\t".join ( 
-#             ["chromosome","start","end","enhancer_id","no_atac_peaks","strand","ATAC_RPM","width","dist2peak",
-#              "gene_name","gene_TSS","gene_start","gene_end","gene_strand"]) + "\n" )
-
-#     for r in sqlresult:
-#         contig, pstart, pend, enhancer_id, no_atac_peaks, strand, ATAC_RPM, gene_name = r[0:8]
-#         gene_start, gene_end, gene_strand = r[8:11]
-        
-#         if gene_strand == "+": gstrand = 1
-#         else: gstrand = 2
-
-#         tss = SE.getTSS(gene_start,gene_end,gene_strand)
-
-#         pwidth = max(pstart,pend) - min(pstart,pend)
-#         ploc = (pstart + pend)/2
-
-#         if gstrand==1: tssdist = tss - ploc
-#         else: tssdist = ploc - tss
-
-#         columns = [ str(x) for x in 
-#                     [  contig, pstart, pend, enhancer_id, no_atac_peaks,
-#                        strand, ATAC_RPM, pwidth, tssdist, gene_name] ]
-#         o.write("\t".join( columns  ) + "\n")
-#     o.close()
-
-#     # get closest genes 2 peaks, 1 gene per peak
-#     tmp_file = tmp + "_tmpfile"
-
-    
-#     statement = '''tail -n +2 %(tmp)s 
-#                 | awk 'BEGIN {OFS="\\t"} {print $4,$5,$6,$7,$8,$9,$10,$1,$2,$3}' 
-#                 | sort -k8,8 -k9,9n -k6,6n 
-#                 | cat | uniq -f7 > %(tmp_file)s && mv %(tmp_file)s %(outfile)s
-#                 && rm %(tmp)s''' % locals()
-
-#     P.run()
-
-# @transform(enhancerTables, suffix(".txt"), ".load")
-# def loadenhancerTables(infile,outfile):
-#     P.load(infile,outfile,
-#            options='-H"enhancer_id,not_atac_peaks,strand,ATAC_RPM,pwidth,tssdist,gene_name,contig,start,end" -i "peak_id" ')
-
-
-
-
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(loadnormaliseBAMcounts)
+@follows(getSEpeaks)
 def full():
     pass
 
