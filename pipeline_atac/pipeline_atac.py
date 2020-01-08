@@ -655,7 +655,7 @@ def mergeReplicatePeaksGenerator():
             if peaks == ".size_filt":
                 suffix = ".size_filt_peaks.filt.bed"
 
-            for reps in replicates.split('\n'):
+            for reps in replicates:
 
                 reps = reps.split(",")
 
@@ -672,6 +672,7 @@ def mergeReplicatePeaksGenerator():
                     bed2 = outDir + reps[1] + suffix
                     bed3 = outDir + reps[2] + suffix
 
+                    print([ [bed1, bed2, bed3], out])
                     yield [ [bed1, bed2, bed3], out]
 
             
@@ -1609,7 +1610,7 @@ def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template(s)'''
 
     templates = PARAMS["report_path"]
-    templates = templates.split(",")
+#    templates = templates.split(",")
 
     if len(templates)==0:
         print("Specify Jupyter ipynb template path in pipeline.ini for html report generation")
@@ -1633,7 +1634,7 @@ def report(infile, outfile):
                      --execute {nbconvert} &&
                    rm {tmp}'''
 
-        P. run()
+        P. run(statement)
     
 
 # ---------------------------------------------------

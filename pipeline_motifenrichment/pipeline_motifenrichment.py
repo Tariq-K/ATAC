@@ -296,7 +296,7 @@ def getMotifIDs(infile, outfile):
     statement.append(P.build_load_statement(tablename, options=options, retry=True) )
     
     statement.append(f''' > {outfile} &&
-                         mv $tmp {filename}'''
+                         mv $tmp {filename}''')
 
     statement = ' '.join(statement)
     
@@ -478,10 +478,10 @@ def fimoBed(infile, outfiles):
     db = PARAMS['database']['url'].split('./')[1]
     outfiles = ','.join(outfiles)
     
-    statement = '''python {script}
-                     --infile {infile}
-                     --outfiles '{outfiles}'
-                     --db {db}'''
+    statement = f'''python {script}
+                      --infile {infile}
+                      --outfiles '{outfiles}'
+                      --db {db}'''
     
     P.run(statement, job_memory="6G")
 

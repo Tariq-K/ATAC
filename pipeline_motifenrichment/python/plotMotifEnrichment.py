@@ -62,6 +62,7 @@ for i in args.infiles:
     if args.fast == "True":
         # dont correct figure axis or zoom to specified window to speed up plotting
         motif_cov = motif_cov[["peak_id", "position", "motif"]]
+        print(motif_cov.head())
         bins = [x for x in range(min(motif_cov["position"])+args.bins, max(motif_cov["position"])+args.bins, args.bins)]
         motif_cov["bins"] = pd.cut(motif_cov["position"], bins)
 

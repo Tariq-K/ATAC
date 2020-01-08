@@ -3,7 +3,10 @@ import sys
 from argparse import ArgumentParser
 import pandas as pd
 import os
-import CGAT.Database as DB
+
+# add parent dir to python path
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
+import PipelineFootprint as F
 
 ####### Parse commandline arguments
 parser = ArgumentParser(prog="normaliseFootprint")
@@ -30,19 +33,18 @@ def footprintNorm(infile, outfile, binSize, db, bam_name):
     else:
         sample = os.path.basename(outfile).split(".")[1]
         
-    query = '''select total_reads from readCounts where sample="%(sample)s"''' % locals()
-    print(query)
-    total_reads = DB.fetch_DataFrame(query, db)["total_reads"].astype(int)
-    print("total reads ", total_reads)
+    query = f'''select total_reads from readCounts where sample="{sample}" '''
+
+    total_reads = F.fetch_DataFrame(query, db)["total_reads"].astype(int)
+    
     motif_cov["motif"] = motif_cov["motif"].apply(lambda x: x/total_reads)
-    print(motif_cov.head())
+
     # get frequency of motif per bin
     bins = [x for x in range(min(motif_cov["position"])+binSize, max(motif_cov["position"])+binSize, binSize)]
     motif_cov["bins"] = pd.cut(motif_cov["position"], bins)
     motif_cov = motif_cov.groupby(["bins"]).agg({"motif":"mean", "position":"mean"})
     motif_cov.reset_index(inplace=True)
     motif_cov = motif_cov[["position", "motif"]]
-    print(motif_cov.head())
     
     motif_cov.to_csv(outfile, index=False)
 
