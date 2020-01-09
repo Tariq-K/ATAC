@@ -31,13 +31,20 @@
 
 # Inputs:
 #    - Fastq files (paired or single end)
-#    - fastq files should be named as such:
-#         sample_condition_treatment_replicate.fastq.[1-2].gz (PE)
-#         sample_condition_treatment_replicate.fastq.gz (SE)
+#    - fastq files should be named as in the following format:
+#         * cell/tissue_condition_treatment_replicate.fastq.[1-2].gz (PE)
+#         * cell/tissue_condition_treatment_replicate.fastq.[1-2].gz (SE)
+#
+#         * if fewer categories are needed to describe samples they may be named
+#            ~ condition_treatment_replicate.fastq*.gz
+#            ~ condition_replicate.fastq*gz
+#
+#         *** it is important that the naming convention is followed otherwise downstream tasks will fail ***
+#
 #    - and placed in data.dir
 
 # Configuration
-#    - Pipeline configuration whould be specified in the pipeline.yml
+#    - Pipeline configuration should be specified in the pipeline.yml
 
 # Outputs
 #    - mapped reads, filtered by insert size
@@ -51,7 +58,7 @@
 #    - cgat-core, cgat-flow (https://github.com/cgat-developers)
 #    - Bowtie2
 #    - Macs2
-#    - PicarTools
+#    - PicardTools
 #    - deepTools
 #    - BedTools
 #    - samtools
@@ -117,18 +124,72 @@ def connect():
 Unpaired = A.isPaired(glob.glob("data.dir/*fastq*gz"))
 
 #####################################################
+####            Sample Info Table                ####
+#####################################################
+@follows(connect)
+@files(None, "sample_info.txt")
+def makeSampleInfoTable(infile, outfile):
+    '''Parse sample names and construct sample info table,
+       with "category" column for DESeq2 design'''
+    
+    make_sample_table = True
+    info = {}
+    n = 0
+
+    files = glob.glob("data.dir/*fastq*gz")
+    
+    if len(files)==0:
+        pass
+    
+    for f in files:
+        n = n +1
+
+        sample_name = os.path.basename(f).split(".")[0]
+        attr =  os.path.basename(f).split(".")[0].split("_")
+
+        if len(attr) == 2:
+            cols = ["sample_name", "condition", "replicate"]
+
+        elif len(attr) == 3:
+            cols = ["sample_name", "condition", "treatment", "replicate"]
+
+        elif len(attr) == 4:
+            cols = ["sample_name", "cell", "condition", "treatment", "replicate"]
+
+        else:
+            make_sample_table = False
+            print("Please reformat sample names according to pipeline documentation")
+
+        info[n] = [sample_name] + attr
+
+    if make_sample_table:
+        sample_info = pd.DataFrame.from_dict(info, orient="index", columns=cols)
+
+        cat_df = sample_info[[x for x in cols if x not in ["sample_name", "replicate"]]]
+        cats = len(cat_df.columns)
+        
+        if cats == 3:
+            cat_df["category"] = cat_df.iloc[:, 0] + "_" + cat_df.iloc[:, 1] + "_" + cat_df.iloc[:, 2]
+        elif cats == 2:
+            cat_df["category"] = cat_df.iloc[:, 0] + "_" + cat_df.iloc[:, 1]
+        else:
+            cat_df["category"] = cat_df.iloc[:, 0]
+
+        con = sqlite3.connect(db)
+        sample_info.to_sql("sample_info", con, if_exists="fail")
+
+        pd.to_csv(outfile, sep="\t", header=True, index=False)
+
+
+#####################################################
 ####                Mapping                      ####
 #####################################################
-@follows(connect, mkdir("bowtie2.dir"))
+@follows(makeSampleInfoTable, mkdir("bowtie2.dir"))
 @transform("data.dir/*.fastq.1.gz",
            regex(r"data.dir/(.*).fastq.1.gz"),
            r"bowtie2.dir/\1.genome.bam")
 def mapBowtie2_PE(infile, outfile):
     '''Map reads with Bowtie2'''
-    to_cluster = True
-
-    #    to_cluster = True cgat-flow documentary states that this statement
-    # is necessary for every take to be sumbitted to cluster, however their code doesn't have it
     
     if len(infile) == 0:
         pass
@@ -729,7 +790,7 @@ def mergeReplicatePeaks(infiles, outfile):
     P.run(statement)
 
 
-#@follows(mergeReplicatePeaks)
+@follows(mergeReplicatePeaks)
 @files(None, "macs2.dir/no_peaks.txt")
 def countPeaks(infiles, outfile):
 
@@ -1157,7 +1218,7 @@ def loadRegulatedGenes(infile, outfile):
 @transform(loadRegulatedGenes,
            suffix(r".load"),
            add_inputs(loadGreatPromoters,uploadEnsGenes),
-           r".annotated.bed")
+           r".closestGene.bed")
 def regulatedTables(infiles, outfile):
     '''Make an informative table about peaks and "regulated" genes'''
     
@@ -1249,14 +1310,14 @@ def indexBAM(infile, outfile):
 def generate_scoreIntervalsBAM_jobs():
     
     # list of bed files & bam files, from which to create jobs
-    intervals = glob.glob("regulated_genes.dir/*annotated.bed")
+    intervals = glob.glob("regulated_genes.dir/*closestGene.bed")
     bams = glob.glob("bowtie2.dir/*.prep.bam")
 
     outDir = "BAM_counts.dir/"
 
     for interval in intervals:
         #print interval
-        ifile = [i.split("/")[-1][:-len(".annotated.bed")] for i in [interval] ]
+        ifile = [i.split("/")[-1][:-len(".closestGene.bed")] for i in [interval] ]
         # iterate over intervals generating infiles & partial filenames
 
         for bam in bams:

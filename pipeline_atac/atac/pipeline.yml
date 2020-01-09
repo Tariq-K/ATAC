@@ -55,7 +55,7 @@ replicates:
     auto_merge: True
 
     # explicitly specify replicate names, & merged name for > 2 replicates
-    # e.g. "sample1_r1,sample1_r2,sample1_r3,sample1\n
+    # e.g. "sample1_r1,sample1_r2,sample1_r3,sample1
     # 	    sample2_r1,sample2_r2,sample2_r3,sample2"
     pairs:
 
@@ -76,7 +76,6 @@ hmmr:
 
     # these are defualt settings + additional bedgraph of chromatin state calls
     options: --minmapq 30 --bedgraph True --peaks True --score max -k 3
-
 
 great:
     #extend basal domain up and down (bp)
