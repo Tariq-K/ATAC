@@ -163,7 +163,8 @@ def makeSampleInfoTable(infile, outfile):
         info[n] = [sample_name] + attr
 
     if make_sample_table:
-        sample_info = pd.DataFrame.from_dict(info, orient="index", columns=cols)
+        sample_info = pd.DataFrame.from_dict(info, orient="index")
+        sample_info.columns = cols
 
         cat_df = sample_info[[x for x in cols if x not in ["sample_name", "replicate"]]]
         cats = len(cat_df.columns)
@@ -176,9 +177,9 @@ def makeSampleInfoTable(infile, outfile):
             cat_df["category"] = cat_df.iloc[:, 0]
 
         con = sqlite3.connect(db)
-        sample_info.to_sql("sample_info", con, if_exists="fail")
+        sample_info.to_sql("sample_info", con, if_exists="replace")
 
-        pd.to_csv(outfile, sep="\t", header=True, index=False)
+        sample_info.to_csv(outfile, sep="\t", header=True, index=False)
 
 
 #####################################################
@@ -275,7 +276,7 @@ def filterBam(infile, outfile):
 
 @transform(filterBam,
            regex(r"(.*).filt.bam"),
-           r"\1.prep.bam")
+           r"\1.all.prep.bam")
 def removeDuplicates(infile, outfile):
     '''PicardTools remove duplicates'''
 
@@ -302,7 +303,7 @@ def removeDuplicates(infile, outfile):
     
 @active_if(Unpaired == False)
 @transform(removeDuplicates,
-           suffix(r".prep.bam"),
+           suffix(r".all.prep.bam"),
            r".size_filt.prep.bam")
 def size_filterBam(infile, outfile):
     '''filter bams on insert size (max size specified in ini)'''
@@ -433,8 +434,8 @@ def loadflagstatBam(infiles, outfile):
 
 @follows(loadflagstatBam)
 @transform("bowtie2.dir/*.bam",
-           regex(r"(\S+)\.(.*).bam"),
-           r"\1_\2.picardAlignmentStats.txt")
+           regex(r"(.*).bam"),
+           r"\1.picardAlignmentStats.txt")
 def picardAlignmentSummary(infile, outfile):
     '''get aligntment summary stats with picard'''
 
@@ -465,8 +466,8 @@ def loadpicardAlignmentSummary(infiles, outfile):
 @active_if(Unpaired == False)
 @follows(flagstatBam)
 @transform("bowtie2.dir/*.bam",
-           regex(r"(\S+)\.(.*).bam"),
-           r"\1_\2.picardInsertSizeMetrics.txt")
+           regex(r"(.*).bam"),
+           r"\1.picardInsertSizeMetrics.txt")
 def picardInsertSizes(infile, outfile):
     '''get aligntment summary stats with picard'''
 
@@ -527,6 +528,14 @@ def mapping():
 ####################################################
 #####              Peakcalling                 #####
 ####################################################
+
+# MACS2 has now been updated for python3
+# TODO:
+#    - test pipeline with new version of MACS2 (2.2.6)
+#    - all parameters appear the same so should be no problems
+#    - if working with new version of MACS2 modify statements to run
+#      in normal environment (no longer need python2 conda env for MACS2)
+
 @active_if(Unpaired)
 @follows(mapping, mkdir("macs2.dir"))
 @transform("bowtie2.dir/*.prep.bam",
@@ -650,10 +659,10 @@ def getATACblacklist(infile, outfile):
 
     
 @follows(getATACblacklist)
-@transform("macs2.dir/*.narrowPeak",
-           regex("(.*).narrowPeak"),
+@transform("macs2.dir/*_peaks.narrowPeak",
+           regex("(.*)_peaks.narrowPeak"),
            add_inputs([getChIPblacklist, getATACblacklist]),
-           r"\1.filt.bed")
+           r"\1.peaks.bed")
 def filterPeaks(infiles, outfile):
     '''subtract blacklist regions from peakset'''
 
@@ -679,7 +688,7 @@ def mergeReplicatePeaksGenerator():
 
         for peaks in peaksets:
 
-            pfiles = glob.glob("macs2.dir/*.filt.bed")
+            pfiles = glob.glob("macs2.dir/*.peaks.bed")
             
             if len(pfiles)==0:
                 pass
@@ -691,10 +700,10 @@ def mergeReplicatePeaksGenerator():
 
             reps = {}
             for p in pfiles:
-                m = re.match(r"macs2.dir/(.*)_([1-9]).*.filt.bed", p) 
+                m = re.match(r"macs2.dir/(.*)_r*([1-9])(.*).peaks.bed", p)
                 sample = m.group(1)
                 rfile = m.group(0)
-
+                
                 if sample in reps:
                     reps[sample].append(rfile)
                 else:
@@ -733,7 +742,6 @@ def mergeReplicatePeaksGenerator():
                     bed2 = outDir + reps[1] + suffix
                     bed3 = outDir + reps[2] + suffix
 
-                    print([ [bed1, bed2, bed3], out])
                     yield [ [bed1, bed2, bed3], out]
 
             
@@ -744,7 +752,7 @@ def mergeReplicatePeaks(infiles, outfile):
 
     tmp = outfile.replace(".bed", ".tmp")
 
-    rep_overlaps = PARAMS["replicates_overlap"] # set this as option in pipeline.ini
+    rep_overlaps = PARAMS["replicates_overlap"]
     
     if len(infiles)==2:
         beda = BedTool(infiles[0])
@@ -775,8 +783,6 @@ def mergeReplicatePeaks(infiles, outfile):
 
                 [contig, start, end, peak_id, peak_score, strand, FC, pval, qval, summit] = cols
 
-#                reps = [x.split("_")[3] for x in peak_id.split(",")] # this is dependent on sample naming...
-
                 # get unique elements from list of replicates by converting to set
                 if len(set(peak_id.split(","))) >= rep_overlaps:
                     # outfile
@@ -794,8 +800,8 @@ def mergeReplicatePeaks(infiles, outfile):
 @files(None, "macs2.dir/no_peaks.txt")
 def countPeaks(infiles, outfile):
 
-    beds = glob.glob("./macs2.dir/*filt.bed")
-    merge_beds = glob.glob("./macs2.dir/*merged.bed")
+    beds = glob.glob("./macs2.dir/*.peaks.bed")
+    merge_beds = glob.glob("./macs2.dir/*.merged.bed")
 
     peaksets = [beds, merge_beds]
 
@@ -809,7 +815,7 @@ def countPeaks(infiles, outfile):
             if "merged" in bed:
                 name = '.'.join(os.path.basename(bed).split(".")[0:3]).replace(".all", "")
             else:
-                name = os.path.basename(bed).replace("_peaks.filt.bed", "")
+                name = os.path.basename(bed).replace(".peaks.bed", "")
 
             df = pd.read_csv(bed, sep="\t", header=None)
 
@@ -922,8 +928,7 @@ def hmmratac(infile, outfile):
 ####                    FRIP                        ####
 ########################################################
 def generate_FRIPcountBAM_jobs():
-
-    all_intervals = glob.glob("macs2.dir/*_peaks.narrowPeak")
+    all_intervals = glob.glob("macs2.dir/*.peaks.bed")
     all_bams = glob.glob("bowtie2.dir/*.prep.bam")
         
     outDir = "FRIP.dir/"
@@ -940,31 +945,19 @@ def generate_FRIPcountBAM_jobs():
     # iterate over grouped files matching bams & peaks
     for group in [size_filt, non_size_filt]:
         group = sum(group, []) # first flatten list
-
-        intervals = [x for x in group if "narrowPeak" in x]
+        intervals = [x for x in group if ".bed" in x]
         bams = [x for x in group if "prep.bam" in x]
 
         for interval in intervals:
-            ifile = [i.split("/")[-1].rstrip("_peaks.narrowPeak") for i in [interval] ]
-            match = ''.join(ifile)
-
+            match = ''.join(['.'.join(os.path.basename(i).split(".")[0:2]) for i in [interval] ])
             for bam in bams:
-                bam_sample = bam.split("/")[-1].rstrip(".prep.bam")
-
+                bam_sample = bam.split("/")[-1].replace(".prep.bam", "")
+                
                 if match in bam and match in interval:
-                    bfile = [b.split("/")[-1][:-len(".prep.bam")] for b in [bam] ]
-
-                    bedfile = ' '.join(str(x) for x in ifile )
-                    bamfile = ' '.join(str(x) for x in bfile )
-
-                    output = outDir + bedfile + "_fripcounts" + ".txt"
-
-                    a = os.path.basename(interval)[:-len("_peaks.narrowPeak")]
-                    b = os.path.basename(bam)[:-len(".prep.bam")]
-                    c = os.path.basename(output)[:-len("_fripcounts.txt")]
-
-                    if a == b and b == c: #sanity check
-                        yield ( [ [interval, bam], output ] )
+                    bfile = ''.join([''.join(os.path.basename(b).split(".")[0:2]) for b in bam ])
+                    output = outDir + match + ".fripcounts" + ".txt"
+                    
+                    yield [ [interval, bam], output ] 
 
                         
 @follows(mkdir("FRIP.dir"), peakcalling)
@@ -997,17 +990,19 @@ def FRIPcountBAM(infiles, outfile):
 
     
 @transform(FRIPcountBAM,
-           regex(r"(.*)_fripcounts.txt"),
-           r"\1_frip.txt")
+           regex(r"(.*).fripcounts.txt"),
+           r"\1.frip.txt")
 def FRIP(infile, outfile):
         '''Calculate fraction of read in peaks'''
 
+        insert_size = PARAMS["bowtie2_insert_size"]
+        
         if "size_filt" in infile:
-            size_filt = '''"<150bp"'''
+            size_filt = '''"<''' + str(insert_size) + '''bp"'''
         else:
             size_filt = "all_fragments"
 
-        sample_name = os.path.basename(infile).replace("_fripcounts.txt", "")
+        sample_name = os.path.basename(infile).replace(".fripcounts.txt", "")
         sample_label = sample_name.split(".")[0]
         bam = "bowtie2.dir/" + sample_name + ".prep.bam"
         
@@ -1060,7 +1055,7 @@ def frip():
 ####                  Merge Peaks                   ####
 ########################################################
 @follows(mkdir("BAM_counts.dir"), frip)
-@merge("macs2.dir/*_peaks.filt.bed", "BAM_counts.dir/merged_peaks.bed")
+@merge("macs2.dir/*.peaks.bed", "BAM_counts.dir/merged_peaks.bed")
 def mergePeaks(infiles, outfile):
     '''cat all peak files, center over peak summit +/- 250 b.p., then merge peaks'''
 
@@ -1099,14 +1094,6 @@ def fetchEnsemblGeneset(infile,outfile):
         the great gene set: For that we would only want protein coding genes with
         GO annotations '''
 
-    # statement = '''select gi.gene_id, gi.gene_name,
-    #                       gs.contig, gs.start, gs.end, gs.strand
-    #                from gene_info gi
-    #                inner join gene_stats gs
-    #                on gi.gene_id=gs.gene_id
-    #                where gi.gene_biotype="protein_coding"
-    #             '''
-
     statement = '''select a.gene_id, a.gene_name, b.contig, min(b.start) as start, max(b.end) as end, b.strand
                      from gene_info a 
                      inner join geneset_all_gtf b 
@@ -1120,7 +1107,7 @@ def fetchEnsemblGeneset(infile,outfile):
                      where b.gene_biotype = "protein_coding" and b.strand = "-" group by b.gene_id'''
 
     anndb = os.path.join(PARAMS["annotations_dir"], "csvdb")
-
+    
     df = A.fetch_DataFrame(statement, anndb)
     df.to_csv(outfile, index=False, sep="\t", header=True)
 
@@ -1326,10 +1313,10 @@ def generate_scoreIntervalsBAM_jobs():
             bedfile = ' '.join(str(x) for x in ifile )
             bamfile = ' '.join(str(x) for x in bfile )
 
-            output = outDir + bedfile + "." + bamfile + "_counts.txt"
+            output = outDir + bedfile + "." + bamfile + ".counts.txt"
             # output = outfiles. 1 for each bed/bam combination
 
-            yield ( [ [interval, bam], output ] )
+            yield [ [interval, bam], output ] 
 
             
 @follows(indexBAM)
@@ -1366,8 +1353,8 @@ def scoreIntervalsBAM(infiles, outfile):
 
     
 @transform(scoreIntervalsBAM,
-           regex(r"(.*)_counts.txt"),
-           r"\1_norm_counts.txt")
+           regex(r"(.*).counts.txt"),
+           r"\1.norm_counts.txt")
 def normaliseBAMcounts(infile, outfile):
     '''normalise BAM counts for file size'''
 
@@ -1375,11 +1362,7 @@ def normaliseBAMcounts(infile, outfile):
     
     counts = pd.read_csv(infile, sep="\t", header=0)
 
-    if "size_filt" in infile:
-        name = os.path.basename(infile).replace("_counts.txt", "").replace(".", "_").replace("merged_peaks_GREAT_", "")
-    else:
-        name = os.path.basename(infile).replace("counts.txt", "").split(".")[-1] + "prep"
-        
+    name = os.path.basename(infile).replace(".counts.txt", "").replace("merged_peaks.GREAT.", "").replace(".", "_")
 
     if Unpaired == False:
         query = f'''select (properly_paired/2)/1E06 as total from flagstats where QC_status = "pass" and sample_id = "{name}" '''  
@@ -1399,10 +1382,9 @@ def normaliseBAMcounts(infile, outfile):
 
                 
 @follows(normaliseBAMcounts)
-@merge("BAM_counts.dir/*_norm_counts.txt", "all_norm_counts.txt")
+@merge("BAM_counts.dir/*.norm_counts.txt", "all_norm_counts.txt")
 def mergeNormCounts(infiles, outfile):
 
-    infiles = [x for x in infiles if "GREAT" in x] # hack, filter preventing inclusion of counts for FRIP if running pipeline out of sequence
     head = infiles[0]
     infiles = ' '.join(infiles)
 
@@ -1493,7 +1475,7 @@ def generator_bamCoverage_mononuc():
     for infile in bams:
         outfile = "deeptools.dir/" + os.path.basename(infile).replace(".prep.bam", ".nucleosome.coverage.bw")
 
-        yield([infile, outfile])
+        yield [infile, outfile]
 
         
 @follows(indexPrepBam)
@@ -1671,7 +1653,6 @@ def report(infile, outfile):
     '''Generate html report on pipeline results from ipynb template(s)'''
 
     templates = PARAMS["report_path"]
-#    templates = templates.split(",")
 
     if len(templates)==0:
         print("Specify Jupyter ipynb template path in pipeline.ini for html report generation")

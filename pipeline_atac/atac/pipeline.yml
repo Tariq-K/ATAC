@@ -9,16 +9,16 @@ database_name: csvdb
 
 annotations:
     # annotations database
-    database: /gfs/mirror/annotations/mm10_ensembl83/csvdb
+    database: /gfs/mirror/annotations/mm10_ensembl91/csvdb
 
     # directory with annotation information
-    dir: /gfs/mirror/annotations/mm10_ensembl83/
+    dir: /gfs/mirror/annotations/mm10_ensembl91/
 
     # chrom sizes file (chromosome, size)
-    chrom_sizes: /gfs/mirror/annotations/mm10_ensembl85/assembly.dir/contigs.tsv
+    chrom_sizes: /gfs/mirror/annotations/mm10_ensembl91/assembly.dir/contigs.tsv
 
 fasta:
-    genome_dir: /gfs/mirror/annotations/mm10_ensembl83/csvdb
+    genome_dir: /gfs/mirror/annotations/mm10_ensembl91/csvdb
 
 bowtie2:
     genomedir: /gfs/mirror/genomes/bowtie/
