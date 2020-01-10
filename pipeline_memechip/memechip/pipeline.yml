@@ -7,19 +7,25 @@ genome_dir: /gfs/mirror/genomes/plain
 # database options for csv2db script
 csv2db_options: --backend=sqlite --retry --map=gene_id:str --map=contig:str --map=transcript_id:str 
 
+infile:
+    # common input formats are:
+    # MACS2 (".narrowPeak" or filtered or merged peaks from pipeline_atac)
+    # DESeq2 differentially accessible peaks (from pipeline_atac DESeq2 notebook)
+    # other (in this case peak center will be the middle of the peak, not read pileup)
+
+    # Specify "macs2", "deseq2", or "other"
+    format: other
+    
 memechip:
     # conda env name to run meme-chip (must be python 2)
     env: meme
     
     # list of public Db's
     motif_db:
-        - /gfs/apps/bio/meme-4.11.2/db/motif_databases/JASPAR/JASPAR_CORE_2016.meme
-	- /gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/uniprobe_mouse.meme
-	- /gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/chen2008.meme
-	- /gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/HOCOMOCOv10_MOUSE_mono_meme_format.meme
-	- /gfs/archive/sansom/kgen/archive/paupar/chartseq/jun16_5iso10k/meme.motifs.dir/transfac.filtered.meme
+        - /gfs/mirror/TRANSFAC/dat/meme/transfac_vertebrate.meme
 
-    # mode:
+    #### MEME OPTIONS ####
+    # meme-mod:
     # oops - One Occurence Per Seqeunce - meme assumes that each sequence only contains 1 occurence of each motif
     #      - fastest and most sensitive, but motifs returned may be "blurry" if any sequences lack them
     # zoops - Zero or One Occurence Per Sequence - meme assumes that each sequence contains at most one occurence of each motif
@@ -27,55 +33,49 @@ memechip:
     # anr - Any Numer of Repetitions - meme assumes that each sequence contains any number of non-overlapping occurences of each motif
     #     - Useful if motifs repeat multiple times within a sequence. If this is the case then will be much more sensitve than oops & zoops.
     #     - Takes 10x more computing power than option 1 and is less sensitive to weak, non-repeated motifs
-    mode: zoops
 
+    # meme-nmotifs:
     # The number of motifs that MEME should search for. Default = 3
-    nmotif: 3
+
+    # meme-maxsize:
+    # Largest allowed dataset for meme. e.g. 600 x 100bp sequences = 600,000 (this is the default max)
+    # be careful of making this too large as it takes a very long time to run meme on large datasets
+
+    options: -meme-mod zoops -meme-nmotifs 3 -meme-minw 5 -meme-maxw 30 -ccut 0 -meme-maxsize 600000
 
     # No. of peaks meme should search for sequences in. Ranked high -> low in score col. 5
     npeaks:
         - 50
-	- 100
+        - 100
 
     # distance from peak center in wich to search for motifs
     widths:
         - 100
-	- 200
-	- 500
-
-    # Largest allowed dataset for meme. e.g. 600 x 100bp sequences = 600,000 (this is the default max)
-    # be careful of making this too large as it takes a very long time to run meme on large datasets
-    meme_maxsize: 600000
-
-    # Pipeline uses softmasked genome
+        - 200
 
 
-    # [ame]
-    # # known motifs to search for in infiles
-    # motif_db: /gfs/apps/bio/meme-4.11.2/db/motif_databases/JASPAR/JASPAR_CORE_2016.meme,/gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/uniprobe_mouse.meme,/gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/chen2008.meme,/gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/HOCOMOCOv10_MOUSE_mono_meme_format.meme,/gfs/archive/sansom/kgen/archive/paupar/chartseq/jun16_5iso10k/meme.motifs.dir/transfac.filtered.meme
-
+ame:
+    # known motifs to search for in infiles
+    motif_db: /gfs/mirror/TRANSFAC/dat/meme/transfac_vertebrate.meme
 
 mast:
     # optionally specify de novo discovered motif to search for w/ mast (currently only works for 1 motif)
     # path to meme_out/meme.txt, no. of motif in file, and the motif name (seperated with comma)
-    meme_motif: 
-    # # Specify TFs for mast to search for, must be caps! Will match all Db hits for TF
-    # motifs: ZNF263,CEBPB,PU.1,TF65,P65,SP1,ZN143,NFYA,STAT1,KLF5,KLF4,IRF5
+    meme_motif:
+    
+    # Specify TFs for mast to search for, must be caps!
+    # reccomended to use end of line match '$' after names
+    motifs:
+        - 
 
-    # # list of TF Db's
-    # motif_db: /gfs/apps/bio/meme-4.11.2/db/motif_databases/JASPAR/JASPAR_CORE_2016.meme,/gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/uniprobe_mouse.meme,/gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/chen2008.meme,/gfs/apps/bio/meme-4.11.2/db/motif_databases/MOUSE/HOCOMOCOv10_MOUSE_mono_meme_format.meme,/gfs/archive/sansom/kgen/archive/paupar/chartseq/jun16_5iso10k/meme.motifs.dir/transfac.filtered.meme
-
-    # mask: none
+    # specify meme formatted motif db(s) to search for known motifs
+    motif_db:
+        -
+    
     # background options: "custom" (for flanking sequences), or False (for default)
     background: custom
 
 annotations:
-
-    mm10_host: www.ensembl.org
-
-    dataset: mmusculus_gene_ensembl
-
-    liftup: /gfs/mirror/ucsc/mm9/liftOver/mm9ToMm10.over.chain.gz
 
     database: /gfs/mirror/annotations/mm10_ensembl83/csvdb
 
@@ -88,7 +88,7 @@ report:
     # path to Jupyter .ipynb template(s).  
     path:
         - ~/devel/my_scripts/git_repo/pipeline_memechip/reports/MEME_ChIP_Pipeline_Report_MEME.ipynb
-	- ~/devel/my_scripts/git_repo/pipeline_memechip/reports/MEME_ChIP_Pipeline_Report_DREME.ipynb
+        - ~/devel/my_scripts/git_repo/pipeline_memechip/reports/MEME_ChIP_Pipeline_Report_DREME.ipynb
 
 
 
