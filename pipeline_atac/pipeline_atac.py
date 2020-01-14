@@ -134,7 +134,6 @@ def makeSampleInfoTable(infile, outfile):
     
     make_sample_table = True
     info = {}
-    n = 0
 
     files = glob.glob("data.dir/*fastq*gz")
     
@@ -142,40 +141,32 @@ def makeSampleInfoTable(infile, outfile):
         pass
     
     for f in files:
-        n = n +1
-
-        sample_name = os.path.basename(f).split(".")[0]
+        sample_id = os.path.basename(f).split(".")[0]
         attr =  os.path.basename(f).split(".")[0].split("_")
 
         if len(attr) == 2:
-            cols = ["sample_name", "condition", "replicate"]
+            cols = ["sample_id", "condition", "replicate"]
 
         elif len(attr) == 3:
-            cols = ["sample_name", "condition", "treatment", "replicate"]
+            cols = ["sample_id", "condition", "treatment", "replicate"]
 
         elif len(attr) == 4:
-            cols = ["sample_name", "cell", "condition", "treatment", "replicate"]
+            cols = ["sample_id", "group", "condition", "treatment", "replicate"]
 
         else:
             make_sample_table = False
             print("Please reformat sample names according to pipeline documentation")
 
-        info[n] = [sample_name] + attr
+        if sample_id not in info:
+            info[sample_id] = [sample_id] + attr
 
     if make_sample_table:
         sample_info = pd.DataFrame.from_dict(info, orient="index")
         sample_info.columns = cols
-
-        cat_df = sample_info[[x for x in cols if x not in ["sample_name", "replicate"]]]
-        cats = len(cat_df.columns)
+        sub = [x for x in list(sample_info) if x not in ["sample_id", "index", "replicate"]]
+        sample_info["category"] = sample_info[sub].apply(lambda x: '_'.join(str(y) for y in x), axis=1)
+        sample_info.reset_index(inplace=True, drop=True)
         
-        if cats == 3:
-            cat_df["category"] = cat_df.iloc[:, 0] + "_" + cat_df.iloc[:, 1] + "_" + cat_df.iloc[:, 2]
-        elif cats == 2:
-            cat_df["category"] = cat_df.iloc[:, 0] + "_" + cat_df.iloc[:, 1]
-        else:
-            cat_df["category"] = cat_df.iloc[:, 0]
-
         con = sqlite3.connect(db)
         sample_info.to_sql("sample_info", con, if_exists="replace")
 
