@@ -43,7 +43,7 @@ Outputs:
 * csvdb: sqlite3 db containing all QC metics, read counts, peak locations, and gene annotations
 * Jupyter notebooks with standard analysis
 
-<br>
+
 ## pipeline_memechip
 Runs MEME-ChIP and HOMER for *de novo* motif discovery. Also, optionally runs MEME suite tools AME and MAST to search for instances of known motifs or motifs diszcovered by MEME-ChIP.
 
