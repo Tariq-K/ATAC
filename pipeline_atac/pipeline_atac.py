@@ -545,7 +545,7 @@ def macs2Predictd(infile, outfile):
                      --verbose 2 {options} 
                      2> {outfile}'''
 
-    P.run(statement, job_condaenv="macs2", job_threads=4)
+    P.run(statement, job_threads=4)
 
     
 @active_if(Unpaired)
@@ -622,7 +622,7 @@ def macs2callpeaks(infile, outfile):
                           --name {name} 
                           >& {outfile}'''  
     
-    P.run(statement, job_condaenv="macs2", job_threads=5)
+    P.run(statement, job_threads=5)
 
     
 @follows(macs2callpeaks)
