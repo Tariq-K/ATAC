@@ -55,14 +55,14 @@
 #    - reports, data exploration and differential accessibility
 
 # Requirements
-#    - cgat-core, cgat-flow (https://github.com/cgat-developers)
+#    - cgat-core, cgat-flow, cgat-apps (https://github.com/cgat-developers)
 #    - Bowtie2
 #    - Macs2
 #    - PicardTools
 #    - deepTools
 #    - BedTools
 #    - samtools
-#    - 
+#    - Jupyter
 
 ######################################################
 

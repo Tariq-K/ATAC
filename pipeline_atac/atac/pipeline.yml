@@ -89,8 +89,10 @@ great:
     half: False
 
 report:
-    # path to Jupyter .ipynb template(s). "," seperated list
-    path: <PATH>/pipeline_atac/reports/ATAC_Pipeline_Report.ipynb,<PATH>/pipeline_atac/reports/ATAC_Pipeline_DESeq2.ipynb
+    # path to Jupyter .ipynb template(s)
+    path:
+        - <PATH>/pipeline_atac/reports/ATAC_Pipeline_Report.ipynb
+        - <PATH>/pipeline_atac/reports/ATAC_Pipeline_DESeq2.ipynb
 
 
 
