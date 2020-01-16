@@ -29,6 +29,7 @@ Tasks:
     - run jupyter notebook reports
     - ATAC_Pipeline_Report - QC and experiment overview
     - ATAC_Pipeline_DESeq2 - differential accessibility testing
+    - ATAC_Pipeline_GeneOntology - GO analysis for differentially accessible peaks
    
 Inputs:
 * fastq.gz formatted files. Can be paired or single end.
