@@ -109,3 +109,47 @@ Runs ROSE-style super enhancer analysis using ATAC-seq peaks as input
 
 ## pipeline_footprint
 Requires high sequencing depth. Calculates cut site frequency over intervals (e.g. motif sites)
+
+
+## Requirements
+
+#### Python
+* cgat-core, cgat-flow, cgat-apps (https://github.com/cgat-developers)
+* ruffus 2.8.3
+* jupyter-notebook 6.0.2
+* rpy2 2.9.3
+* pandas 0.25.3
+* numpy 1.17.3
+* pybedtools 0.8.0
+* seaborn 0.9.0
+* matplotlib 3.1.1
+* sqlite3
+
+#### Tools
+* Bowtie2 2.3.0
+* Macs2 2.2.6
+* PicardTools 2.10.9
+* deepTools 3.3.1
+* BedTools 2.25.0
+* samtools 1.9
+* meme 4.11.2
+* homer 4.10.1
+
+#### R
+* reshape
+* reshape2
+* RColorBrewer
+* ComplexHeatmap
+* circlize
+* dendextend
+* Rtsne
+* gplots
+* ggrepel
+* ggplot2
+* gridExtra
+* wesanderson
+* DESeq2
+* vsn
+* stringr
+* rGREAT
+
