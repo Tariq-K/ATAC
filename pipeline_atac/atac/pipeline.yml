@@ -93,6 +93,8 @@ report:
     path:
         - <PATH>/pipeline_atac/reports/ATAC_Pipeline_Report.ipynb
         - <PATH>/pipeline_atac/reports/ATAC_Pipeline_DESeq2.ipynb
+        - <PATH>/pipeline_atac/reports/ATAC_Pipeline_GeneOntology.ipynb
+	
 
 
 

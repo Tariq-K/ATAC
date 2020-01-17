@@ -54,15 +54,6 @@
 #    - QC, mapping, peakcalling, signal:background
 #    - reports, data exploration and differential accessibility
 
-# Requirements
-#    - cgat-core, cgat-flow, cgat-apps (https://github.com/cgat-developers)
-#    - Bowtie2
-#    - Macs2
-#    - PicardTools
-#    - deepTools
-#    - BedTools
-#    - samtools
-#    - Jupyter
 
 ######################################################
 
@@ -1648,26 +1639,26 @@ def report(infile, outfile):
     if len(templates)==0:
         print("Specify Jupyter ipynb template path in pipeline.ini for html report generation")
         pass
-
+    
     for template in templates:
         infile = os.path.basename(template)
         outfile = infile.replace(".ipynb", ".nbconvert.html")
         nbconvert = infile.replace(".ipynb", ".nbconvert.ipynb")
         tmp = os.path.basename(template)
-    
+        
         statement = f'''cp {template} .  &&
-                   jupyter nbconvert 
-                     --to notebook 
-                     --allow-errors 
-                     --ExecutePreprocessor.timeout=360
-                     --execute {infile} && 
-                   jupyter nbconvert 
-                     --to html 
-                     --ExecutePreprocessor.timeout=360
-                     --execute {nbconvert} &&
-                   rm {tmp}'''
+                        jupyter nbconvert 
+                          --to notebook 
+                          --allow-errors 
+                          --ExecutePreprocessor.timeout=360
+                          --execute {infile} && 
+                        jupyter nbconvert 
+                          --to html 
+                          --ExecutePreprocessor.timeout=360
+                          --execute {nbconvert} &&
+                        rm {tmp}'''
 
-        P. run(statement)
+        P.run(statement)
     
 
 # ---------------------------------------------------
