@@ -38,7 +38,7 @@ This is for generic ATAC-seq analysis, to be run after cgatflow readqc and adapt
     
 #### Outputs:
 * bowtie2.dir: mapped and filtered BAMs
-* macs2.dir: Macs2 output, plus filtered peaks ("*.peaks.bed"), and merged peaks ("*.merged.bed")
+* macs2.dir: Macs2 output, plus filtered peaks ("\*.peaks.bed"), and merged peaks ("\*.merged.bed")
 * DESeq2.dir: BED files contataining differentially accessible peaks
 * deeptools.dir: bigWig coverage tracks
 * csvdb: sqlite3 db containing all QC metics, read counts, peak locations, and gene annotations
