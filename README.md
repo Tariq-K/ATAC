@@ -6,7 +6,7 @@ Pipeline for analysis of ATAC-seq data
 
 This is for generic ATAC-seq analysis, to be run after cgatflow readqc and adaptor removal of fastq files.
 
-Tasks:
+#### Tasks:
 1) mapping
     - Bowtie2
     - Duplicate removal
@@ -31,12 +31,12 @@ Tasks:
     - ATAC_Pipeline_DESeq2 - differential accessibility testing
     - ATAC_Pipeline_GeneOntology - GO analysis for differentially accessible peaks
    
-Inputs:
+#### Inputs:
 * fastq.gz formatted files. Can be paired or single end.
 * should be named sample_r1.fastq.[1-2].gz (PE) or sample_r1.fastq.gz (SE)
 * naming convention: sample names should be informative e.g. "group_condition_treatment_replicate.fastq.1.gz" as they're used to generate a sample information table to annotate plots and create comparisons for DESeq2
     
-Outputs:
+#### Outputs:
 * bowtie2.dir: mapped and filtered BAMs
 * macs2.dir: Macs2 output, plus filtered peaks ("*.peaks.bed"), and merged peaks ("*.merged.bed")
 * DESeq2.dir: BED files contataining differentially accessible peaks
@@ -48,7 +48,7 @@ Outputs:
 ## pipeline_memechip
 Runs MEME-ChIP and HOMER for *de novo* motif discovery. Also, optionally runs MEME suite tools AME and MAST to search for instances of known motifs or motifs diszcovered by MEME-ChIP.
 
-Tasks:
+#### Tasks:
 1) runMemeAnalysis
     - offsets peaks to peak centre +/- n b.p. 
     - gets peak flanking regions (of equal width to peaks) for local background
@@ -65,11 +65,11 @@ Tasks:
 5) runMastAnalysis
     - run MAST on MEME-ChIP results (specified in pipeline.yml)
     
-Inputs:
+#### Inputs:
 * BED formatted peak files e.g. output from pipeline_atac.py or Macs2
 * Specify the format of peak files in pipeline.yml
 
-Outputs:
+#### Outputs:
 * meme.chip.dir: MEME-ChIP results
 * homer.chip.dir: Homer results (with local background)
 * homer.genome.dir: Homer results (with genomic background)
@@ -81,7 +81,7 @@ Outputs:
 ## pipeline_motifenrichment
 Fimo scanning for known motifs. Creates per base pair matrix of motif occurences and plots motif frequencies over input intervals. 
 
-Tasks:
+#### Tasks:
 1) prepSequences
     - Get peak centres +/- n b.p.
     - Get peak sequences
@@ -93,12 +93,12 @@ Tasks:
 4) plotMotifEnrichment
     - plot motif enrichment over peaks
 
-Inputs:
+#### Inputs:
 * BED formatted peak files e.g. output from pipeline_atac.py or Macs2
 * MEME Minimal formatted motifs e.g. dreme/meme output from pipeline_memechip.py
 * Database motifs of interest (specified in pipeline.yml)
     
-Outputs:
+#### Outputs:
 * fimo.dir: FIMO results
 * motif.coverage.dir: motif coverage matrices and enrichment plots
 * query_motifs.dir/motif_logos: motif logos
@@ -117,7 +117,7 @@ Requires high sequencing depth. Calculates cut site frequency over intervals (e.
 * cgat-core, cgat-flow, cgat-apps (https://github.com/cgat-developers)
 * ruffus 2.8.3
 * jupyter-notebook 6.0.2
-* rpy2 2.9.3
+* rpy2 3.2.4
 * pandas 0.25.3
 * numpy 1.17.3
 * pybedtools 0.8.0
@@ -136,6 +136,7 @@ Requires high sequencing depth. Calculates cut site frequency over intervals (e.
 * homer 4.10.1
 
 #### R
+* R 3.6.0
 * reshape
 * reshape2
 * RColorBrewer
