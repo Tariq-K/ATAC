@@ -33,7 +33,11 @@ Input files
 2) database of MEME formatted motifs 
    - motifs of interest specified in pipeline.ini
 3) *optional* custom MEME motifs
+   - these can be MEME minimal motif format files (meme.txt and dreme.txt) 
+     from pipeline_memechip
+   - or other MEME format motif file
    - named "motif".meme
+   - and located in data.dir
 
 
 Requirements
@@ -330,9 +334,11 @@ def motifLogos(infiles, outfiles):
         outdir = head + "/motif_logos/"
 
         # iterate over each motif in list of databases
-        if "db_motifs" in infile:
-            statement = f'''for i in `grep "^MOTIF" {infile} | 
-                                    tr -s "[[:blank:]]" "_" | 
+#        if "db_motifs" in infile:
+        statement = f'''for i in `grep "^MOTIF" {infile} | 
+                                    tr -s "[[:blank:]]" "\\t" |
+                                    cut -f1-3 | 
+                                    tr -s "\\t" "_" |
                                         sed 's/MOTIF_//' `; 
                             do m=`echo $i | sed 's/_/\\t/' | cut -f1` ; 
                                o=`echo \\'$i".png"\\' | sed 's/\\///'`; 
@@ -344,17 +350,17 @@ def motifLogos(infiles, outfiles):
                             done  && 
                             mv *png {outdir}'''
 
-        # or plot first motif in file for cutom motifs (should only be 1 motif/file)
-        else:
-            name = os.path.basename(infile)
-            title = name.replace(".meme", "")
-            outfile = outdir + name.replace(".meme", ".png")
+        # # or plot first motif in file for cutom motifs (should only be 1 motif/file)
+        # else:
+        #     name = os.path.basename(infile)
+        #     title = name.replace(".meme", "")
+        #     outfile = outdir + name.replace(".meme", ".png")
 
-            statement = f'''ceqlogo 
-                              -i1 {infile} 
-                              -t {title}
-                              -f PNG
-                              -o {outfile}'''
+        #     statement = f'''ceqlogo 
+        #                       -i1 {infile} 
+        #                       -t {title}
+        #                       -f PNG
+        #                       -o {outfile}'''
 
         P.run(statement)
     
@@ -522,78 +528,14 @@ def coverageBedGenerator():
             for anno in mlist:
                 sequence_name, motif_dir = anno.split("/")[1].split(".")
 
-                # match custom motifs to infiles
-                if motif_dir != "db_motifs":
-                    outfile = outdir + interval_name + "." + motif_dir + ".coverage.bed.gz"
-                    
-                else:
-                    # db_motifs
-                    motif_name = os.path.basename(anno).replace("fimo_", "").replace(".bed", "")
-                    motif_name = motif_name.replace("(", "").replace(")", "") # hack, remove or escape special chars
-                    outfile = outdir + interval_name + "." + motif_name + ".coverage.bed.gz"
+                motif_name = os.path.basename(anno).replace("fimo_", "").replace(".bed", "")
+                motif_name = motif_name.replace("(", "").replace(")", "") # hack, remove or escape special chars
+                outfile = ''.join([outdir, interval_name, ".", motif_dir, "_", motif_name, ".coverage.bed.gz"])
                     
                 if interval_name == sequence_name:
-
                     yield [ [bed, anno], outfile]
-                                  
 
-# it would be more space efficient to merge these 2 tasks and delete intermediate files
-
-# @follows(runFIMO, mkdir("motif.coverage.dir"))
-# @files(coverageBedGenerator)
-# def coverageBed(infiles, outfile):
-#     '''Calculate per base coverage of peaks by motif files'''
-
-#     bed, motif = infiles
-
-#     statement = '''coverageBed 
-#                      -d 
-#                      -a %(bed)s                      
-#                      -b %(motif)s 
-#                    | gzip - > %(outfile)s '''
-
-#     print(statement)
-
-#     P.run(statement)
-    
-
-# @transform(coverageBed,
-#            regex(r"(.*).bed.gz"),
-#            r"\1.bed.prep.gz")
-# def prepareBeds(infile, outfile):
-#     '''Prepare BEDs for plotting'''
-
-#     # This used to be in plotMotifEnrichment.py but was to slow when implemented in pandas
-#     # Prepare beds for plotting here instead
-    
-#     # 1) position in peak changed to peak centre +/- n b.p. (rather than peak start)
-#     # 2) subset on window to plot (peak centre +/- n b.p. )
-
-#     tmp_dir = "$SCRATCH_DIR"
-#     window = PARAMS["fimo_plot_window"]
-
-#     statement = '''tmp=`mktemp -p %(tmp_dir)s &&
-#                    awk 'BEGIN {OFS="\\t"} 
-#                      {pwidth=$3-$2}
-#                      {pcentre=pwidth/2}
-#                      {if ($5 >= pcentre) print $1,$2,$3,$4,$5-pcentre,$6;
-#                      else print $1,$2,$3,$4,"-"pcentre-$5,$6}'
-#                      <( zcat %(infile)s )
-#                      > $tmp &&
-#                    awk 'BEGIN {OFS="\\t"}
-#                      {if ($5 <= %(window)s && $5 >= -%(window)s ) print $0}' 
-#                      $tmp |
-#                    grep -v "chrM" - |
-#                    gzip - > %(outfile)s'''
-
-#     # problem with erroneous intervals on chrM not of uniform length
-#     # these should be removed as most likely artifacts
-    
-#     print(statement)
-
-#     P.run(statement)
-
-### TEST - merge both statements
+                    
 @follows(runFIMO, mkdir("motif.coverage.dir"))
 @files(coverageBedGenerator)
 def coverageBed(infiles, outfile):
@@ -647,7 +589,7 @@ def plotMotifEnrichment(infile, outfile):
     normalisation = PARAMS["fimo_norm"]
     
     statement = f'''python {script}
-                      --infile {infile}
+                      --infiles {infile}
                       --outfile {outfile}
                       --motif {motif}
                       --region {region}
@@ -695,7 +637,7 @@ def plotMotifEnrichmentAll(infiles, outfile):
     normalisation = PARAMS["fimo_norm"]
     
     statement = f'''python {script}
-                      --infile {infiles}
+                      --infiles {infiles}
                       --outfile {outfile}
                       --region {region} 
                       --norm {normalisation}

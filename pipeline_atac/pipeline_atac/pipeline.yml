@@ -1,0 +1,100 @@
+###----
+genome: mm10
+
+# location of indexed genome 
+genome_dir: /gfs/mirror/genomes/index
+
+# database in which to record data
+database_name: csvdb
+
+annotations:
+    # annotations database
+    database: /gfs/mirror/annotations/mm10_ensembl91/csvdb
+
+    # directory with annotation information
+    dir: /gfs/mirror/annotations/mm10_ensembl91/
+
+    # chrom sizes file (chromosome, size)
+    chrom_sizes: /gfs/mirror/annotations/mm10_ensembl91/assembly.dir/contigs.tsv
+
+fasta:
+    genome_dir: /gfs/mirror/annotations/mm10_ensembl91/csvdb
+
+bowtie2:
+    genomedir: /gfs/mirror/genomes/bowtie/
+    genome: mm10
+
+    # Specify whether data is paired (unpaired=False) or single (unpaired=True) reads
+    # If left blank this will be determined automatically
+    unpaired: False
+
+    # Set Bowtie2 options
+    # -X insert size option is commonly increased to 2000 for ATAC data
+    options: --local -X 2000
+
+    # Filter reads by insertsize
+    # both size filtered & non-size filtered reads will be output & used for peakcalling
+    insert_size: 150
+
+macs2:
+    pe_options: --format BAMPE --nomodel  --keep-dup all --mfold 5 50 --gsize 1.87e9
+
+    ### single end
+    # predictd uses same options as macs2 to get insert size
+    se_options: --nomodel --shift 100 --extsize 200  --keep-dup all --mfold 5 50 --gsize 1.87e9
+
+    # maximum q-value to accept from MACS - the minimum is 0.01 (this options sets --qvalue)
+    max_qvalue: 0.01
+
+    # use all peaks or size filtered? ofr downstream tasks (all,size_filt)
+    peaks: size_filt
+
+replicates:
+    # automatically merge replicates for high confidence peaks
+    # works for 2 replicates, if >2 reps set as False and specify rep names in pairs opt.
+    auto_merge: True
+
+    # explicitly specify replicate names, & merged name for > 2 replicates
+    # e.g. "sample1_r1,sample1_r2,sample1_r3,sample1
+    # 	    sample2_r1,sample2_r2,sample2_r3,sample2"
+    pairs:
+
+    # no of reps peak has to be detected in to remain in merged peakset
+    overlap: 2
+    
+peak_filter:
+    ## Ensembl ChIP & Greenleaf lab chrM homologue blacklists used by default
+    chip_blacklist: http://mitra.stanford.edu/kundaje/akundaje/release/blacklists/mm10-mouse/mm10.blacklist.bed.gz
+    atac_blacklist: https://sites.google.com/site/atacseqpublic/atac-seq-analysis-methods/mitochondrialblacklists-1/JDB_blacklist.mm10.bed?attredirects=0&d=1
+
+read_counts:
+    # set window size in bp. Reads are countered over peak center +/- window/2
+    window: 500
+
+hmmr:
+    executable: /gfs/devel/tkhoyratty/GIT/HMMRATAC/HMMRATAC_V1.2.5_exe.jar
+
+    # these are defualt settings + additional bedgraph of chromatin state calls
+    options: --minmapq 30 --bedgraph True --peaks True --score max -k 3
+
+great:
+    #extend basal domain up and down (bp)
+    basal_up: 5000
+    basal_down: 1000
+
+    #maximum extension (bp)
+    max: 1000000
+
+    #restrict extensions to half way to the nearest gene (False|True)
+    half: False
+
+report:
+    # path to Jupyter .ipynb template(s)
+    path:
+        - <PATH>/pipeline_atac/reports/ATAC_Pipeline_Report.ipynb
+        - <PATH>/pipeline_atac/reports/ATAC_Pipeline_DESeq2.ipynb
+        - <PATH>/pipeline_atac/reports/ATAC_Pipeline_GeneOntology.ipynb
+	
+
+
+

@@ -19,6 +19,7 @@ annotations:
 
 fimo:
     # Specify TFs for mast to search for, must be caps! Will match all Db hits for TF
+    # "," seperated list
     motifs: 
 
     # list of TF Db's

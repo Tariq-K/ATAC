@@ -1,61 +1,62 @@
-######################################################
+'''###################################################
 #                                                    #
 #                   Pipeline ATAC                    #
 #                                                    #
 ######################################################
 
-# Pipeline for analysis of ATAC-seq data
-#
-# Tasks:
-# 1) mapping
-#    - Bowtie2
-#    - Duplicate removal
-#    - Insert size filtering
-#    - Collect QC metrics
-# 2) peakcalling
-#    - Macs2 callpeak
-#    - Subtract blacklists
-#    - Merge replicate peaks
-#    - Annotate peaks to genes
-#    - QC
-# 3) counting
-#    - Make consensus peakset of all detected peaks
-#    - Count reads over consensus peakset
-#    - Normalise counts
-# 4) bigwigs
-#    - Prepare bigWigs for visualisation
-#    - Plot coverage at TSS's
-# 5) report
-#    - run jupyter notebook reports
+Pipeline for analysis of ATAC-seq data
+
+Tasks:
+1) mapping
+   - Bowtie2
+   - Duplicate removal
+   - Insert size filtering
+   - Collect QC metrics
+2) peakcalling
+   - Macs2 callpeak
+   - Subtract blacklists
+   - Merge replicate peaks
+   - Annotate peaks to genes
+   - QC
+3) counting
+   - Make consensus peakset of all detected peaks
+   - Count reads over consensus peakset
+   - Normalise counts
+4) bigwigs
+   - Prepare bigWigs for visualisation
+   - Plot coverage at TSS's
+5) report
+   - run jupyter notebook reports
 
 
-# Inputs:
-#    - Fastq files (paired or single end)
-#    - fastq files should be named as in the following format:
-#         * cell/tissue_condition_treatment_replicate.fastq.[1-2].gz (PE)
-#         * cell/tissue_condition_treatment_replicate.fastq.[1-2].gz (SE)
-#
-#         * if fewer categories are needed to describe samples they may be named
-#            ~ condition_treatment_replicate.fastq*.gz
-#            ~ condition_replicate.fastq*gz
-#
-#         *** it is important that the naming convention is followed otherwise downstream tasks will fail ***
-#
-#    - and placed in data.dir
+Inputs:
+   - Fastq files (paired or single end)
+   - fastq files should be named as in the following format:
+        * cell/tissue_condition_treatment_replicate.fastq.[1-2].gz (PE)
+        * cell/tissue_condition_treatment_replicate.fastq.[1-2].gz (SE)
 
-# Configuration
-#    - Pipeline configuration should be specified in the pipeline.yml
+        * if fewer categories are needed to describe samples they may be named
+           ~ condition_treatment_replicate.fastq*.gz
+           ~ condition_replicate.fastq*gz
 
-# Outputs
-#    - mapped reads, filtered by insert size
-#    - called peaks, merged peaks (by replicates)
-#    - read counts, for differential accessibility testing
-#    - coverage tracks, for visualisation
-#    - QC, mapping, peakcalling, signal:background
-#    - reports, data exploration and differential accessibility
+        *** it is important that the naming convention is followed otherwise downstream tasks will fail ***
+
+   - and placed in data.dir
+
+Configuration
+   - Pipeline configuration should be specified in the pipeline.yml
+
+Outputs
+   - mapped reads, filtered by insert size
+   - called peaks, merged peaks (by replicates)
+   - read counts, for differential accessibility testing
+   - coverage tracks, for visualisation
+   - QC, mapping, peakcalling, signal:background
+   - reports, data exploration and differential accessibility
 
 
 ######################################################
+'''
 
 from ruffus import *
 

@@ -33,50 +33,40 @@ def fimoBed(infile, outfiles, db):
         
         motifIDs = ''.join(infile.split("/")[1].split(".")[1])
     
-        query = '''select b.chr, b.start + a.start as start, 
+        query = f'''select b.chr, b.start + a.start as start, 
                    b.start + a.stop as end, a.sequence_name, 
                    a.score, a.strand, a.pattern_name, c.TF, 
                    a.matched_sequence, a.p_value, a.q_value 
-                   from %(fimo)s a, %(peaks)s b, %(motifIDs)s c 
+                   from {fimo} a, {peaks} b, {motifIDs} c 
                    where a.sequence_name = b.peak_id 
-                   and a.pattern_name = c.pattern_name''' % locals()
+                   and a.pattern_name = c.pattern_name'''
 
     else:
-        query = '''select b.chr, b.start + a.start as start, 
+        query = f'''select b.chr, b.start + a.start as start, 
                    b.start + a.stop as end, a.sequence_name, 
-                   a.score, a.strand, a.pattern_name, 
+                   a.score, a.strand, a.pattern_name, a.pattern_name as TF,
                    a.matched_sequence, a.p_value, a.q_value 
-                   from %(fimo)s a, %(peaks)s b 
-                   where a.sequence_name = b.peak_id ''' % locals()
-    print(query)
+                   from {fimo} a, {peaks} b 
+                   where a.sequence_name = b.peak_id '''
+        # added pseudo TF column so motifs from custom meme file will be seperated
+        
     df = m.fetch_DataFrame(query, db)
 
-#    df = df[df["q_value"] < padj] # filter by FDR
-# dont filter by FDR, as this is to stringent for motif enrichment plots
-# only motif-sequence match (p-value (FIMO default)
+    # make sure multiple motifs for single TF aren't merged
+    df["TF"] = df.apply(lambda x: '_'.join([x.TF, x.pattern_name]) if x.TF != x.pattern_name else x.TF, axis=1) 
+    motifs = df["TF"].unique()
 
-    if "db_motifs" not in infile:
-        motifID = infile.split("/")[1].split(".")[1]
-        df["TF"] = motifID
-        
-        df.to_csv(table, sep="\t", index=False)
-        df[["chr", "start", "end", "sequence_name", "score", "strand", "TF"]].to_csv(bed, sep="\t", header=None, index=False)
+    if len(motifs) > 1:
+        # if multiple TFs were searched for generate seperate BED & summary file for each one
+        for motif in motifs:
+            res = df[df["TF"] == motif]
+            mtable = table.replace("_summary.txt", "_") + str(motif) + "_summary.txt"
+            mbed = bed.replace(".bed", "_") + str(motif) + ".bed"
+            res.to_csv(mtable, sep="\t", index=False)
+            res[["chr", "start", "end", "sequence_name", "score", "strand", "TF"]].to_csv(mbed, sep="\t", header=None, index=False)
 
-    else:
-        df["TF"] = df.apply(lambda x: '_'.join([x.TF, x.pattern_name]), axis=1) # make sure multiple motifs for single TF aren't merged
-        motifs = df["TF"].unique()
-
-        if len(motifs) > 1:
-            # if multiple TFs were searched for generate seperate BED & summary file for each one
-            for motif in motifs:
-                res = df[df["TF"] == motif]
-                mtable = table.replace("_summary.txt", "_") + motif + "_summary.txt"
-                mbed = bed.replace(".bed", "_") + motif + ".bed"
-                res.to_csv(mtable, sep="\t", index=False)
-                res[["chr", "start", "end", "sequence_name", "score", "strand", "TF"]].to_csv(mbed, sep="\t", header=None, index=False)
-
-        df.to_csv(table, sep="\t", index=False)
-        df[["chr", "start", "end", "sequence_name", "score", "strand", "TF"]].to_csv(bed, sep="\t", header=None, index=False)
+    df.to_csv(table, sep="\t", index=False)
+    df[["chr", "start", "end", "sequence_name", "score", "strand", "TF"]].to_csv(bed, sep="\t", header=None, index=False)
 
 
 # run job

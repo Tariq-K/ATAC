@@ -550,10 +550,7 @@ def annotatePeaks(infile, outfile):
     name = run.split(".")[0]
     peak_file = "data.dir/" + name + ".bed"
 
-    # # select top motifs to search for
-    # motifs = "homer.chip.dir/" + run + "/homerResults/motif[1-6].motif"
-
-    # search for all discovered motifs
+    # update this so homer run to be used can be specified in pipeline.yml
     motifs = "homer.genome.dir/" + run + "/homerResults/motif*.motif"
     
     statement = f'''annotatePeaks.pl 
