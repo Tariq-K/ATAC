@@ -1651,11 +1651,11 @@ def report(infile, outfile):
                         jupyter nbconvert 
                           --to notebook 
                           --allow-errors 
-                          --ExecutePreprocessor.timeout=360
+                          --ExecutePreprocessor.timeout=-1
                           --execute {infile} && 
                         jupyter nbconvert 
                           --to html 
-                          --ExecutePreprocessor.timeout=360
+                          --ExecutePreprocessor.timeout=-1
                           --execute {nbconvert} &&
                         rm {tmp}'''
 
