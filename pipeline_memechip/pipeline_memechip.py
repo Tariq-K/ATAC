@@ -643,9 +643,9 @@ def runAme(infile,  outfile):
                      --bgfile {bfile}
                      --bgformat 2 
                      --method fisher
-                     --length-correct
-                     <( cat {infile} )
-                     <( cat {motifDb} )
+                     --length-correction
+                     {infile} 
+                     {motifDb}
                      > {outfile}'''
 
     P.run(statement, job_memory="10G", job_threads=4)
