@@ -199,7 +199,7 @@ def getMemeSequences(infile, outfile):
     genome_idx = os.path.join(PARAMS["annotations_dir"],"assembly.dir/contigs.tsv")
 
     statement = f'''fastaFromBed 
-                      -name
+                      -nameOnly
                       -fi {genome_fasta} 
                       -bed {infile} 
                       -fo {outfile}'''
