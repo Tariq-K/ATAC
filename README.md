@@ -35,13 +35,14 @@ This is for generic ATAC-seq analysis, to be run after cgatflow readqc and adapt
 * fastq.gz formatted files. Can be paired or single end.
 * should be named sample_r1.fastq.[1-2].gz (PE) or sample_r1.fastq.gz (SE)
 * naming convention: sample names should be informative e.g. "group_condition_treatment_replicate.fastq.1.gz" as they're used to generate a sample information table to annotate plots and create comparisons for DESeq2
+* infiles should be placed in a folder named "data.dir/"
     
 #### Outputs:
 * bowtie2.dir: mapped and filtered BAMs
 * macs2.dir: Macs2 output, plus filtered peaks ("\*.peaks.bed"), and merged peaks ("\*.merged.bed")
 * DESeq2.dir: BED files contataining differentially accessible peaks
 * deeptools.dir: bigWig coverage tracks
-* csvdb: sqlite3 db containing all QC metics, read counts, peak locations, and gene annotations
+* csvdb: sqlite3 db containing all QC metrics, read counts, peak locations, and gene annotations
 * Jupyter notebooks with standard analysis
 
 
@@ -124,6 +125,10 @@ Requires high sequencing depth. Calculates cut site frequency over intervals (e.
 * seaborn 0.9.0
 * matplotlib 3.1.1
 * sqlite3
+* yaml
+* glob
+* os
+* re
 
 #### Tools
 * Bowtie2 2.3.0
